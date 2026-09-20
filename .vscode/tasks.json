@@ -1,0 +1,83 @@
+{
+  // Run a task with: Cmd/Ctrl+Shift+P -> "Tasks: Run Task".
+  // "Run" is the default build task, so Cmd/Ctrl+Shift+B builds and starts the app.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Configure",
+      "detail": "cmake -S . -B build (downloads dependencies on first run)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["-S", ".", "-B", "build"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Build",
+      "detail": "Build Isosurfaces and the tests in Release mode",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "build", "--config", "Release", "--parallel"],
+      "dependsOn": "Configure",
+      "group": "build",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Run",
+      "detail": "Build, then start the app (setup dialog opens)",
+      "type": "shell",
+      "command": "./build/Isosurfaces",
+      "windows": { "command": ".\\build\\Release\\Isosurfaces.exe" },
+      "dependsOn": "Build",
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run: sample sphere",
+      "detail": "Build, then remesh assets/sphere.obj without the dialog",
+      "type": "shell",
+      "command": "./build/Isosurfaces",
+      "windows": { "command": ".\\build\\Release\\Isosurfaces.exe" },
+      "args": ["assets/sphere.obj", "--function", "sphere", "--divisor", "1.0"],
+      "dependsOn": "Build",
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Configure (Debug)",
+      "detail": "cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["-S", ".", "-B", "build-debug", "-DCMAKE_BUILD_TYPE=Debug"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Build (Debug)",
+      "detail": "Debug build in build-debug/ (used by the F5 launch configurations)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "build-debug", "--config", "Debug", "--parallel"],
+      "dependsOn": "Configure (Debug)",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Test",
+      "detail": "Build, then run the unit tests",
+      "type": "shell",
+      "command": "ctest",
+      "args": ["-C", "Release", "--output-on-failure"],
+      "options": { "cwd": "${workspaceFolder}/build" },
+      "dependsOn": "Build",
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Clean",
+      "detail": "Remove build outputs (dependencies stay downloaded)",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "build", "--target", "clean"],
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  // F5 builds a Debug version (build-debug/) and starts it under the debugger.
+  // Needs the "C/C++" extension (ms-vscode.cpptools).
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug: setup dialog",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-debug/Isosurfaces",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build (Debug)",
+      "osx": { "MIMode": "lldb" },
+      "linux": { "MIMode": "gdb" },
+      "windows": {
+        "type": "cppvsdbg",
+        "program": "${workspaceFolder}\\build-debug\\Debug\\Isosurfaces.exe"
+      }
+    },
+    {
+      "name": "Debug: sample sphere",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-debug/Isosurfaces",
+      "args": ["assets/sphere.obj", "--function", "sphere", "--divisor", "1.0"],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build (Debug)",
+      "osx": { "MIMode": "lldb" },
+      "linux": { "MIMode": "gdb" },
+      "windows": {
+        "type": "cppvsdbg",
+        "program": "${workspaceFolder}\\build-debug\\Debug\\Isosurfaces.exe"
+      }
+    },
+    {
+      "name": "Debug: unit tests",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-debug/isosurfaces_tests",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build (Debug)",
+      "osx": { "MIMode": "lldb" },
+      "linux": { "MIMode": "gdb" },
+      "windows": {
+        "type": "cppvsdbg",
+        "program": "${workspaceFolder}\\build-debug\\Debug\\isosurfaces_tests.exe"
+      }
+    }
+  ]
+}
