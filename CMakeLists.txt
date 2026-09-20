@@ -1,87 +1,97 @@
-cmake_minimum_required(VERSION 3.16.3)
+cmake_minimum_required(VERSION 3.18)
 project(Isosurfaces LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # so VS Code's IntelliSense knows the flags/includes
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
 
 include(FetchContent)
 
 # ---------------------------------------------------------------------------
 # pmp-library
 # Brings its own vendored Eigen, GLFW, GLAD and ImGui, so nothing needs to be
-# installed system-wide on either Windows or macOS besides a compiler and
-# CMake itself. PMP_BUILD_VIEWERS builds the pmp::MeshViewer class we need.
+# installed system-wide besides a compiler and CMake. PMP_BUILD_VIS builds
+# pmp::MeshViewer (the GLFW/ImGui window).
 # ---------------------------------------------------------------------------
 set(PMP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(PMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(PMP_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-set(PMP_BUILD_VIS ON CACHE BOOL "" FORCE) # builds pmp_vis (MeshViewer, GLFW/ImGui window)
-set(PMP_INSTALL ON CACHE BOOL "" FORCE) # NOTE: must stay ON — it's what makes pmp's own
-                                         # headers visible to us at all (see CMakeLists.txt
-                                         # comment below); it does not itself install anything
-set(PMP_STRICT_COMPILATION OFF CACHE BOOL "" FORCE) # don't fail the build on pmp's own warnings
+set(PMP_BUILD_VIS ON CACHE BOOL "" FORCE)
+set(PMP_INSTALL ON CACHE BOOL "" FORCE) # must stay ON: pmp only exposes its own
+                                        # include directories when this is set
+set(PMP_STRICT_COMPILATION OFF CACHE BOOL "" FORCE) # don't fail on pmp's own warnings
 
 FetchContent_Declare(
   pmp-library
   GIT_REPOSITORY https://github.com/pmp-library/pmp-library.git
-  GIT_TAG 3.0.0 # pinned: main has since renamed pmp/visualization/ to pmp/viewers/,
-                # which would break MyViewer.h's #include paths
+  GIT_TAG 3.0.0 # pinned: main renamed pmp/visualization/ to pmp/viewers/
 )
 FetchContent_MakeAvailable(pmp-library)
 
-# --- Workaround for a pmp-library 3.0.0 CMake bug -----------------------
-# pmp-library's bundled imgui/CMakeLists.txt looks for GLFW's headers via
-# ${CMAKE_SOURCE_DIR}/<path>, which is meant to be pmp-library's own source
-# dir when it's built standalone. But CMAKE_SOURCE_DIR always resolves to
-# the top-level project's dir (ours), so once pulled in via FetchContent
-# it looks in the wrong place and fails with "GLFW/glfw3.h: No such file
-# or directory". We fix it by adding the correct include path ourselves.
+# Workaround for a pmp-library 3.0.0 bug: its bundled imgui/CMakeLists.txt
+# looks for GLFW's headers under ${CMAKE_SOURCE_DIR}, which is *our* source
+# dir when pmp is pulled in via FetchContent, so the build fails with
+# "GLFW/glfw3.h: No such file or directory". Add the correct path ourselves.
 if(TARGET imgui)
   file(GLOB _glfw_dirs "${pmp-library_SOURCE_DIR}/external/glfw-*")
   list(GET _glfw_dirs 0 _glfw_dir)
   target_include_directories(imgui PRIVATE "${_glfw_dir}/include")
 endif()
-# --------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# autodiff
-# Header-only (we only use the forward-mode "dual" API), so we fetch the
-# source and just add it to the include path rather than building it.
+# autodiff (header-only; only forward-mode dual numbers are used)
+# Its own CMakeLists insists on a system-wide Eigen, which we don't need, so
+# SOURCE_SUBDIR points at a directory that doesn't exist: MakeAvailable then
+# only downloads the sources and we expose the headers ourselves.
 # ---------------------------------------------------------------------------
 FetchContent_Declare(
   autodiff
   GIT_REPOSITORY https://github.com/autodiff/autodiff.git
-  GIT_TAG main
+  GIT_TAG v1.1.2
+  SOURCE_SUBDIR do-not-configure
 )
-FetchContent_GetProperties(autodiff)
-if(NOT autodiff_POPULATED)
-  FetchContent_Populate(autodiff)
-endif()
+FetchContent_MakeAvailable(autodiff)
+
+add_library(autodiff INTERFACE)
+add_library(autodiff::autodiff ALIAS autodiff)
+target_include_directories(autodiff SYSTEM INTERFACE ${autodiff_SOURCE_DIR})
 
 # ---------------------------------------------------------------------------
-# Isosurfaces executable
+# The program. New .cpp files in src/method/ or src/app/ are picked up
+# automatically (re-run "cmake -S . -B build", or just build again).
+#
+#   src/method/  the maths: surfaces, remeshing, measurements, research code
+#   src/app/     the window, file browser, command line, saved settings
 # ---------------------------------------------------------------------------
-add_executable(Isosurfaces src/main.cpp src/MyViewer.cpp)
+file(GLOB METHOD_SOURCES CONFIGURE_DEPENDS src/method/*.cpp)
+file(GLOB APP_SOURCES CONFIGURE_DEPENDS src/app/*.cpp)
 
-target_include_directories(Isosurfaces PRIVATE
-  ${CMAKE_SOURCE_DIR}/include
-  ${autodiff_SOURCE_DIR}
-)
-
-# pmp     = core mesh data structure/algorithms
-# pmp_vis = MeshViewer/TrackballViewer and the GLFW/ImGui window code
-target_link_libraries(Isosurfaces PRIVATE pmp pmp_vis)
+# "method" has no window code, so the tests can use it without OpenGL
+add_library(isosurfaces_method STATIC ${METHOD_SOURCES})
+target_include_directories(isosurfaces_method PUBLIC src)
+target_link_libraries(isosurfaces_method PUBLIC pmp autodiff::autodiff)
 
 if(MSVC)
-  target_compile_definitions(Isosurfaces PRIVATE _USE_MATH_DEFINES)
+  target_compile_options(isosurfaces_method PRIVATE /W4)
+else()
+  target_compile_options(isosurfaces_method PRIVATE -Wall -Wextra)
 endif()
 
-# Copy everything in assets/ (your .obj input meshes) next to the built
-# executable after every build, so relative paths like "wavy_network.obj"
-# in main.cpp resolve correctly no matter where CMake puts the binary.
-add_custom_command(TARGET Isosurfaces POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory
-          ${CMAKE_SOURCE_DIR}/assets
-          $<TARGET_FILE_DIR:Isosurfaces>
-)
+find_package(Threads REQUIRED) # the window runs jobs on a worker thread
+add_executable(Isosurfaces ${APP_SOURCES})
+target_link_libraries(Isosurfaces PRIVATE isosurfaces_method pmp_vis Threads::Threads)
+
+# ---------------------------------------------------------------------------
+# Tests (run with ctest)
+# ---------------------------------------------------------------------------
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(isosurfaces_tests tests/tests.cpp src/app/Settings.cpp)
+  target_link_libraries(isosurfaces_tests PRIVATE isosurfaces_method)
+  add_test(NAME isosurfaces_tests COMMAND isosurfaces_tests)
+endif()
