@@ -1,0 +1,241 @@
+wavy_network
+25,1.5,6
+=== INPUT MESH ===
+Total number of triangles: 349248
+Total number of vertices: 174678
+Median Volume: 0.000784641
+Triangles with volume less than median: 175790
+Triangles with at least one angle less than 25 degrees: 125725
+Quadric Deviation from Median Volume: 0.317548
+Average unsigned distance from implicit surface: 0.00016593
+Max unsigned distance from implicit surface: 0.000610383
+Number of vertices NOT on the surface (tol > 0.0001): 105918
+Metric computation time: 52.2384s
+=== PROJECTED MESH ===
+Total number of triangles: 349248
+Total number of vertices: 174678
+Median Volume: 0.00078516
+Triangles with volume less than median: 175796
+Triangles with at least one angle less than 25 degrees: 125722
+Quadric Deviation from Median Volume: 0.317646
+Average unsigned distance from implicit surface: 4.55127e-08
+Max unsigned distance from implicit surface: 2.76413e-07
+Number of vertices NOT on the surface (tol > 0.0001): 0
+Metric computation time: 53.7128s
+Iter: 1
+Iter: 2
+Iter: 3
+Iter: 4
+Iter: 5
+Iter: 6
+=== TOTAL RUNTIME: 6.14466 seconds ===
+=== OUTPUT MESH ===
+Total number of triangles: 164698
+Total number of vertices: 82403
+Median Volume: 0.00164112
+Triangles with volume less than median: 81400
+Triangles with at least one angle less than 25 degrees: 0
+Quadric Deviation from Median Volume: 0.168628
+Average unsigned distance from implicit surface: 5.00982e-08
+Max unsigned distance from implicit surface: 2.96894e-07
+Number of vertices NOT on the surface (tol > 0.0001): 0
+Metric computation time: 15.0406s
+
+------------------------------
+QEM PRojected
+=== QEM MESH ===
+Total number of triangles: 164698
+Total number of vertices: 82403
+Median Volume: 0.001543
+Triangles with volume less than median: 78871
+Triangles with at least one angle less than 25 degrees: 4957
+Quadric Deviation from Median Volume: 0.24293
+Average unsigned distance from implicit surface: 0.00011847
+Max unsigned distance from implicit surface: 0.0013674
+Number of vertices NOT on the surface (tol > 0.0001): 37733
+Metric computation time: 14.7859 s
+=== PROJECTED QEM MESH ===
+Total number of triangles: 164698
+Total number of vertices: 82403
+Median Volume: 0.00154342
+Triangles with volume less than median: 78880
+Triangles with at least one angle less than 25 degrees: 4952
+Quadric Deviation from Median Volume: 0.242825
+Average unsigned distance from implicit surface: 4.45613e-08
+Max unsigned distance from implicit surface: 2.79684e-07
+Number of vertices NOT on the surface (tol > 0.0001): 0
+Metric computation time: 14.2536 s
+
+-------------------------------------------------------------------------------------
+30,1.3,15
+=== INPUT MESH ===
+Total number of triangles: 349248
+Total number of vertices: 174678
+Median Volume: 0.000784641
+Triangles with volume less than median: 175790
+Triangles with at least one angle less than 30 degrees: 151744
+Quadric Deviation from Median Volume: 0.317548
+Average unsigned distance from implicit surface: 0.00016593
+Max unsigned distance from implicit surface: 0.000610383
+Number of vertices NOT on the surface (tol > 0.0001): 105918
+Metric computation time: 67.8375s
+=== PROJECTED MESH ===
+Total number of triangles: 349248
+Total number of vertices: 174678
+Median Volume: 0.00078516
+Triangles with volume less than median: 175796
+Triangles with at least one angle less than 30 degrees: 151750
+Quadric Deviation from Median Volume: 0.317646
+Average unsigned distance from implicit surface: 4.55127e-08
+Max unsigned distance from implicit surface: 2.76413e-07
+Number of vertices NOT on the surface (tol > 0.0001): 0
+Metric computation time: 63.2316s
+Iter: 1
+Iter: 2
+Iter: 3
+Iter: 4
+Iter: 5
+Iter: 6
+Iter: 7
+Iter: 8
+Iter: 9
+Iter: 10
+Iter: 11
+Iter: 12
+Iter: 13
+Iter: 14
+Iter: 15
+=== TOTAL RUNTIME: 10.507 seconds ===
+=== OUTPUT MESH ===
+Total number of triangles: 8728
+Total number of vertices: 4418
+Median Volume: 0.030341
+Triangles with volume less than median: 4261
+Triangles with at least one angle less than 30 degrees: 0
+Quadric Deviation from Median Volume: 0.774998
+Average unsigned distance from implicit surface: 4.68649e-08
+Max unsigned distance from implicit surface: 2.75059e-07
+Number of vertices NOT on the surface (tol > 0.0001): 0
+Metric computation time: 0.0633189s
+------------------------------
+QEM PRojected
+=== QEM MESH ===
+Total number of triangles: 8728
+Total number of vertices: 4418
+Median Volume: 0.0293542
+Triangles with volume less than median: 4228
+Triangles with at least one angle less than 30 degrees: 1894
+Quadric Deviation from Median Volume: 1.47753
+Average unsigned distance from implicit surface: 0.00608308
+Max unsigned distance from implicit surface: 0.0166607
+Number of vertices NOT on the surface (tol > 0.0001): 4418
+Metric computation time: 0.10653 s
+=== PROJECTED QEM MESH ===
+Total number of triangles: 8728
+Total number of vertices: 4418
+Median Volume: 0.0288208
+Triangles with volume less than median: 4215
+Triangles with at least one angle less than 30 degrees: 1970
+Quadric Deviation from Median Volume: 1.47747
+Average unsigned distance from implicit surface: 4.20582e-08
+Max unsigned distance from implicit surface: 2.55872e-07
+Number of vertices NOT on the surface (tol > 0.0001): 0
+Metric computation time: 0.0848808 s
+==============================================================================================
+Lotus_Form
+25,1.5,6
+=== INPUT MESH ===
+Total number of triangles: 26176
+Total number of vertices: 13100
+Median Volume: 0.000916106
+Triangles with volume less than median: 13068
+Triangles with at least one angle less than 15 degrees: 5035
+Quadric Deviation from Median Volume: 0.0844965
+Average unsigned distance from implicit surface: 0.00263291
+Max unsigned distance from implicit surface: 0.207684
+Number of vertices NOT on the surface (tol > 0.0001): 11915
+Metric computation time: 0.826319s
+=== PROJECTED MESH ===
+Total number of triangles: 26176
+Total number of vertices: 13100
+Median Volume: nan
+Triangles with volume less than median: 10149
+Triangles with at least one angle less than 15 degrees: 5073
+Quadric Deviation from Median Volume: nan
+Average unsigned distance from implicit surface: nan
+Max unsigned distance from implicit surface: 3.72191e-06
+Number of vertices NOT on the surface (tol > 0.0001): 0
+Metric computation time: 0.916366s
+Iter: 1
+Iter: 2
+Iter: 3
+Iter: 4
+Iter: 5
+Iter: 6
+=== TOTAL RUNTIME: 0.221085 seconds ===
+=== OUTPUT MESH ===
+Total number of triangles: 19534
+Total number of vertices: 9779
+Median Volume: 0.00125824
+Triangles with volume less than median: 8163
+Triangles with at least one angle less than 15 degrees: 4
+Quadric Deviation from Median Volume: nan
+Average unsigned distance from implicit surface: nan
+Max unsigned distance from implicit surface: 3.72191e-06
+Number of vertices NOT on the surface (tol > 0.0001): 0
+Metric computation time: 0.267558s 
+-----------------------------
+QEM Projected
+-----------------------------
+30,1.3,15
+=== INPUT MESH ===
+Total number of triangles: 26176
+Total number of vertices: 13100
+Median Volume: 0.000916106
+Triangles with volume less than median: 13068
+Triangles with at least one angle less than 30 degrees: 10203
+Quadric Deviation from Median Volume: 0.0844965
+Average unsigned distance from implicit surface: 0.00263291
+Max unsigned distance from implicit surface: 0.207684
+Number of vertices NOT on the surface (tol > 0.0001): 11915
+Metric computation time: 0.817104s
+=== PROJECTED MESH ===
+Total number of triangles: 26176
+Total number of vertices: 13100
+Median Volume: nan
+Triangles with volume less than median: 10149
+Triangles with at least one angle less than 30 degrees: 10239
+Quadric Deviation from Median Volume: nan
+Average unsigned distance from implicit surface: nan
+Max unsigned distance from implicit surface: 3.72191e-06
+Number of vertices NOT on the surface (tol > 0.0001): 0
+Metric computation time: 0.877455s
+Iter: 1
+Iter: 2
+Iter: 3
+Iter: 4
+Iter: 5
+Iter: 6
+Iter: 7
+Iter: 8
+Iter: 9
+Iter: 10
+Iter: 11
+Iter: 12
+Iter: 13
+Iter: 14
+Iter: 15
+=== TOTAL RUNTIME: 0.608292 seconds ===
+=== OUTPUT MESH ===
+Total number of triangles: 14042
+Total number of vertices: 7033
+Median Volume: 0.00143943
+Triangles with volume less than median: 6171
+Triangles with at least one angle less than 30 degrees: 35
+Quadric Deviation from Median Volume: nan
+Average unsigned distance from implicit surface: nan
+Max unsigned distance from implicit surface: 3.72191e-06
+Number of vertices NOT on the surface (tol > 0.0001): 0
+Metric computation time: 0.132677s
+-----------------------------
+QEM Projected
