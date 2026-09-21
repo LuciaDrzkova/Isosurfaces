@@ -167,20 +167,24 @@ void RemeshViewer::draw_report()
 
     const ImGuiTableFlags flags =
         ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg;
-    if (ImGui::BeginTable("stats", 4, flags))
+    if (ImGui::BeginTable("stats", 3, flags))
     {
         ImGui::TableSetupColumn("");
         ImGui::TableSetupColumn("Input");
-        ImGui::TableSetupColumn("Projected");
         ImGui::TableSetupColumn("Output");
+        // pmp uses black text on a light panel, but the header background would
+        // stay dark, so give it a light one
+        ImGui::PushStyleColor(ImGuiCol_TableHeaderBg,
+                              ImVec4(0.78f, 0.87f, 0.98f, 1.0f));
         ImGui::TableHeadersRow();
+        ImGui::PopStyleColor();
 
         auto row = [&](const char* label, auto&& cell) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::TextUnformatted(label);
             for (const MeshMetrics* m :
-                 {&report_->input, &report_->projected, &report_->output})
+                 {&report_->input, &report_->output})
             {
                 ImGui::TableNextColumn();
                 ImGui::TextUnformatted(cell(*m).c_str());
@@ -236,7 +240,7 @@ void RemeshViewer::draw_setup_dialog()
     ImGui::InputText("##input", input_, sizeof input_);
     ImGui::SameLine();
     if (ImGui::Button("Browse..."))
-        browser_.open(fs::path(input_).parent_path());
+        input_browser_.open(fs::path(input_).parent_path());
     ImGui::TextDisabled("Triangle mesh (.obj .off .stl .ply ...). "
                         "You can also drop a file onto the window.");
 
@@ -264,17 +268,35 @@ void RemeshViewer::draw_setup_dialog()
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Outer passes; the target triangle area is re-measured on each.");
 
-    ImGui::SetNextItemWidth(200 * s);
-    ImGui::SliderFloat("Min angle (deg)", &remesh_.min_angle, 0.0f, 60.0f, "%.1f");
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Triangles with an angle below this are collapsed.");
+    // A slider for quick changes and a number field to type an exact value
+    auto slider_with_input = [&](const char* label, float* value, float min,
+                                 float max, const char* tooltip,
+                                 ImGuiSliderFlags flags = 0) {
+        ImGui::PushID(label);
+        ImGui::SetNextItemWidth(200 * s);
+        ImGui::SliderFloat("##slider", value, min, max, "", flags); // value is shown in the field
+        const bool over_slider = ImGui::IsItemHovered();
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(80 * s);
+        ImGui::InputFloat("##input", value, 0.0f, 0.0f, "%.2f");
+        const bool over_input = ImGui::IsItemHovered();
+        ImGui::SameLine();
+        ImGui::TextUnformatted(label);
+        if (over_slider || over_input || ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", tooltip);
+        ImGui::PopID();
+    };
 
-    ImGui::SetNextItemWidth(200 * s);
-    ImGui::SliderFloat("Area divisor", &remesh_.area_divisor, 0.1f, 10.0f, "%.2f",
-                       ImGuiSliderFlags_Logarithmic);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Triangles smaller than (median area / divisor) are collapsed.\n"
-                          "Lower values coarsen the mesh more.");
+    slider_with_input("Min angle (deg)", &remesh_.min_angle, 0.0f, 60.0f,
+                      "Triangles with an angle below this are collapsed.");
+    slider_with_input("Area divisor", &remesh_.area_divisor, 0.1f, 10.0f,
+                      "Triangles smaller than (median area / divisor) are "
+                      "collapsed.\nLower values coarsen the mesh more.",
+                      ImGuiSliderFlags_Logarithmic);
+
+    // Typed values may be outside the slider's range, but not nonsensical
+    remesh_.min_angle = clamp(remesh_.min_angle, 0.0f, 180.0f);
+    remesh_.area_divisor = clamp(remesh_.area_divisor, 0.01f, 1000.0f);
 
     // --- Experiment ----------------------------------------------------------
     ImGui::SeparatorText("Experiment (optional)");
@@ -299,6 +321,9 @@ void RemeshViewer::draw_setup_dialog()
     ImGui::SeparatorText("Output mesh");
     ImGui::SetNextItemWidth(400 * s);
     ImGui::InputText("##output", output_, sizeof output_);
+    ImGui::SameLine();
+    if (ImGui::Button("Browse...##output"))
+        output_browser_.open(fs::path(output_).parent_path());
 
     ImGui::EndDisabled();
 
@@ -331,10 +356,18 @@ void RemeshViewer::draw_setup_dialog()
             ImGui::CloseCurrentPopup();
     }
 
-    // The file browser opens on top of this dialog
+    // The file browsers open on top of this dialog
     string picked;
-    if (browser_.draw(s, picked))
+    if (input_browser_.draw(s, picked))
         set_text(input_, picked);
+    if (output_browser_.draw(s, picked))
+    {
+        // Change the folder, keep the file name ("output.obj" if none)
+        string name = fs::path(output_).filename().string();
+        if (name.empty())
+            name = "output.obj";
+        set_text(output_, (fs::path(picked) / name).string());
+    }
 
     ImGui::EndPopup();
 }

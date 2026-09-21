@@ -57,6 +57,7 @@ JobReport run_job(const JobSettings& settings)
 
     report.output = compute_mesh_metrics(mesh, *surface, angle);
     pmp::write(mesh, settings.output);
+
     return report;
 }
 

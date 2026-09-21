@@ -26,7 +26,7 @@ struct JobReport
 {
     MeshMetrics input;     //!< mesh as read from disk
     MeshMetrics projected; //!< after projecting every vertex onto the surface
-    MeshMetrics output;    //!< after remeshing
+    MeshMetrics output;    //!< after remeshing (this is what is saved)
     std::vector<int> collapses_per_iteration;
     double seconds = 0; //!< remeshing time only
     std::string experiment_log; //!< text written by the experiment, if any

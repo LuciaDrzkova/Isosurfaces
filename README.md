@@ -101,11 +101,17 @@ built automatically; you do not need to install them.
    .\build\Release\Isosurfaces.exe
    ```
 
+### Rebuild and run in one step
+
+After the first build, double-click **`run.command`** (macOS) or **`run.bat`**
+(Windows) in the project folder. It rebuilds whatever changed and starts the
+program. From a terminal: `./run.command` or `.\run.bat`.
+
 ### Optional: Visual Studio Code
 
 With [Visual Studio Code](https://code.visualstudio.com/) and its *C/C++* and
 *CMake Tools* extensions, open the project folder and press
-`Cmd/Ctrl + Shift + B` to build and start the program in one step, or `F5` to
+`Cmd/Ctrl + Shift + B` to rebuild and start the program in one step, or `F5` to
 run it under the debugger.
 
 ### If something goes wrong
@@ -134,12 +140,15 @@ Start the program and a setup dialog opens.
    | Min angle | Triangles with an angle below this (degrees) are collapsed. |
    | Area divisor | Triangles with an area below *median area / divisor* are collapsed. Lower values give a coarser mesh. |
 
-4. **Output mesh:** where the result is saved (default `output.obj`).
+4. **Output mesh:** where the result is saved (default `output.obj`). Click
+   *Browse...* to choose a different folder.
 5. Click **Run**.
 
-The result appears in the window, and the side panel compares the input mesh, the
-projected mesh and the final mesh: vertex and triangle counts, how far the
-vertices are from the surface (`|f|`), and how many skinny triangles remain.
+The result appears in the window, and the side panel compares the input mesh with
+the output mesh (the remeshed result, which is saved): vertex and triangle
+counts, how far the vertices are from the surface (`|f|`), and how many skinny
+triangles remain. The console additionally prints the mesh right after the
+projection step.
 *Setup...* in the side panel reopens the dialog, and the program remembers your
 last choices. In the 3D view, drag to rotate and scroll to zoom; press `?` to
 list all key bindings.

@@ -34,20 +34,25 @@ ImplicitSurface::Sample ImplicitSurface::evaluate(const pmp::Point& p) const
 }
 
 pmp::Point ImplicitSurface::project(pmp::Point p, int max_iterations,
-                                    double tolerance) const
+                                    float tolerance) const
 {
     for (int i = 0; i < max_iterations; ++i)
     {
         const Sample s = evaluate(p);
-        if (abs(s.value) < tolerance)
-            break;
+        const float f = static_cast<float>(s.value);
+        const float grad_norm2 = pmp::dot(s.gradient, s.gradient);
 
-        const double grad_norm2 = pmp::dot(s.gradient, s.gradient);
-        if (grad_norm2 < 1e-10)
+        if (grad_norm2 < 1e-10f)
             break; // critical point: no direction to move in
 
         // Newton step towards f = 0 along the gradient
-        p -= static_cast<pmp::Scalar>(s.value / grad_norm2) * s.gradient;
+        p = p - (f / grad_norm2) * s.gradient;
+
+        // Checked after the step (with the value from before it): once the
+        // point is within tolerance, one more step is still taken. This is what
+        // the original program did, so results stay identical.
+        if (abs(f) < tolerance)
+            break;
     }
     return p;
 }

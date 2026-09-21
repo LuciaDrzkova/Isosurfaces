@@ -41,6 +41,8 @@ fs::path home_directory()
 
 } // namespace
 
+FileBrowser::FileBrowser(Mode mode) : mode_(mode) {}
+
 void FileBrowser::open(const fs::path& start_dir)
 {
     error_code ec;
@@ -89,14 +91,17 @@ void FileBrowser::go_to(const fs::path& target)
 
 bool FileBrowser::draw(float scale, string& picked)
 {
+    const bool folders = mode_ == Mode::Folder;
+    const char* title = folders ? "Choose output folder" : "Choose mesh";
+
     if (open_requested_)
     {
-        ImGui::OpenPopup("Choose mesh");
+        ImGui::OpenPopup(title);
         open_requested_ = false;
     }
 
     ImGui::SetNextWindowSize(ImVec2(520 * scale, 0), ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal("Choose mesh", nullptr,
+    if (!ImGui::BeginPopupModal(title, nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize))
         return false;
 
@@ -117,6 +122,11 @@ bool FileBrowser::draw(float scale, string& picked)
         for (const auto& e : entries_)
         {
             const string label = (e.is_dir ? "[dir]  " : "       ") + e.name;
+            if (folders && !e.is_dir)
+            {
+                ImGui::TextDisabled("%s", label.c_str()); // shown for context
+                continue;
+            }
             if (!ImGui::Selectable(label.c_str(), false))
                 continue;
             if (e.is_dir)
@@ -135,7 +145,22 @@ bool FileBrowser::draw(float scale, string& picked)
     if (!next_dir.empty())
         go_to(next_dir);
 
-    if (ImGui::Button("Cancel") || chosen)
+    const bool cancelled = ImGui::Button("Cancel");
+    if (folders)
+    {
+        // Bottom right, on the same row as Cancel
+        const float width = ImGui::CalcTextSize("Use this folder").x +
+                            2 * ImGui::GetStyle().FramePadding.x;
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - width);
+        if (ImGui::Button("Use this folder"))
+        {
+            picked = dir_.string();
+            chosen = true;
+        }
+    }
+
+    if (cancelled || chosen)
         ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
     return chosen;
