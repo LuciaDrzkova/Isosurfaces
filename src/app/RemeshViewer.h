@@ -54,7 +54,8 @@ private:
 
     bool open_setup_ = false;
     bool dialog_running_ = false; //!< the dialog's Run button started the job
-    FileBrowser browser_;
+    FileBrowser input_browser_{FileBrowser::Mode::OpenFile};
+    FileBrowser output_browser_{FileBrowser::Mode::Folder};
     std::filesystem::path settings_file_;
 
     std::future<JobReport> job_;

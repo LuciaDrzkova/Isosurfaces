@@ -46,10 +46,10 @@ public:
     Sample evaluate(const pmp::Point& p) const;
 
     //! Newton-Raphson projection of \p p onto the surface along the gradient.
-    //! Stops when |f| < \p tolerance, when the gradient vanishes, or after
-    //! \p max_iterations steps.
+    //! Stops after the step on which |f| < \p tolerance, when the gradient
+    //! vanishes, or after \p max_iterations steps.
     pmp::Point project(pmp::Point p, int max_iterations = 10,
-                       double tolerance = 1e-6) const;
+                       float tolerance = 1e-6f) const;
 
 private:
     std::string name_;

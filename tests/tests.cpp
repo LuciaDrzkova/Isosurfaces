@@ -2,11 +2,13 @@
 // process exits non-zero at the end.
 
 #include "method/ImplicitSurface.h"
+#include "method/Job.h"
 #include "method/MeshMetrics.h"
 #include "method/Remesher.h"
 #include "app/Settings.h"
 
 #include <pmp/algorithms/shapes.h>
+#include <pmp/io/io.h>
 
 #include <cmath>
 #include <filesystem>
@@ -115,6 +117,34 @@ void test_remesh_sphere()
     CHECK(m1.n_vertices == mesh.n_vertices());
 }
 
+void test_job_report()
+{
+    const auto dir = filesystem::temp_directory_path() / "iso_test_job";
+    filesystem::create_directories(dir);
+
+    pmp::write(pmp::icosphere(3), dir / "in.obj"); // radius 1, not on f = 0
+
+    iso::JobSettings settings;
+    settings.input = (dir / "in.obj").string();
+    settings.output = (dir / "out.obj").string();
+    settings.function = "sphere";
+    settings.remesh.area_divisor = 0.8f;
+    const auto report = iso::run_job(settings);
+
+    CHECK(report.input.max_distance > 1.0); // radius 1 vs sqrt(5)
+    CHECK(report.output.n_vertices < report.input.n_vertices);
+    CHECK(filesystem::exists(settings.output));
+
+    // "Projected" is the input mesh after the first projection: the same mesh
+    // as the input, but on the surface. The output stays on the surface too.
+    CHECK(report.projected.n_vertices == report.input.n_vertices);
+    CHECK(report.projected.n_faces == report.input.n_faces);
+    CHECK(report.projected.max_distance < 1e-5);
+    CHECK(report.output.max_distance < 1e-5);
+
+    filesystem::remove_all(dir);
+}
+
 void test_remesh_rejects_bad_input()
 {
     const auto* sphere = iso::find_surface("sphere");
@@ -196,6 +226,7 @@ int main()
     test_gradient();
     test_projection();
     test_remesh_sphere();
+    test_job_report();
     test_remesh_rejects_bad_input();
     test_settings_round_trip();
 
