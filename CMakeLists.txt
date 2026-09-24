@@ -75,6 +75,7 @@ file(GLOB APP_SOURCES CONFIGURE_DEPENDS src/app/*.cpp)
 add_library(isosurfaces_method STATIC ${METHOD_SOURCES})
 target_include_directories(isosurfaces_method PUBLIC src)
 target_link_libraries(isosurfaces_method PUBLIC pmp autodiff::autodiff)
+target_compile_definitions(isosurfaces_method PUBLIC NOMINMAX)
 
 if(MSVC)
   target_compile_options(isosurfaces_method PRIVATE /W4)
@@ -85,6 +86,15 @@ endif()
 find_package(Threads REQUIRED) # the window runs jobs on a worker thread
 add_executable(Isosurfaces ${APP_SOURCES})
 target_link_libraries(Isosurfaces PRIVATE isosurfaces_method pmp_vis Threads::Threads)
+target_compile_definitions(Isosurfaces PRIVATE NOMINMAX)
+add_custom_command(TARGET Isosurfaces POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "$<TARGET_FILE:pmp>"
+    "$<TARGET_FILE_DIR:Isosurfaces>"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "$<TARGET_FILE:glfw>"
+    "$<TARGET_FILE_DIR:Isosurfaces>"
+)
 
 # ---------------------------------------------------------------------------
 # Tests (run with ctest)
