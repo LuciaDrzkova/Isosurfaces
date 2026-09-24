@@ -106,8 +106,9 @@ MeshMetrics compute_mesh_metrics(const pmp::SurfaceMesh& mesh,
                 p[i++] = mesh.position(v);
 
         const auto angles = triangle_angles(p[0], p[1], p[2]);
-
-        if (*min_element(angles.begin(), angles.end()) < min_angle_threshold) 
+        const float min_angle = *min_element(angles.begin(), angles.end());
+        
+        if (min_angle < m.min_angle_threshold && min_angle > 0.0f) 
             ++m.faces_with_small_angle;
     }
 
