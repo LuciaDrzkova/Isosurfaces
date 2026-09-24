@@ -10,6 +10,9 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <iomanip>
+#include <limits>
+#include <sstream>
 
 using namespace std;
 namespace fs = filesystem;
@@ -31,6 +34,13 @@ string format(const char* fmt, Args... args)
     char buffer[64];
     snprintf(buffer, sizeof buffer, fmt, args...);
     return buffer;
+}
+
+string exact_metric(double value)
+{
+    ostringstream stream;
+    stream << setprecision(numeric_limits<double>::max_digits10) << value;
+    return stream.str();
 }
 
 } // namespace
@@ -119,6 +129,17 @@ void RemeshViewer::collect_finished_job()
     try
     {
         report_ = job_.get();
+        print_metrics(cout, "INPUT MESH", report_->input);
+        print_metrics(cout, "PROJECTED MESH", report_->projected);
+        for (size_t i = 0; i < report_->collapses_per_iteration.size(); ++i)
+            cout << "Iteration " << i + 1 << ": "
+                 << report_->collapses_per_iteration[i] << " collapses\n";
+        cout << "Remeshing took " << exact_metric(report_->seconds) << " s\n";
+        if (!report_->experiment_log.empty())
+            cout << "=== EXPERIMENT " << current_settings().experiment << " ===\n"
+                 << report_->experiment_log;
+        print_metrics(cout, "OUTPUT MESH", report_->output);
+        cout << "Wrote " << job_output_ << '\n';
         load_mesh(job_output_.c_str()); // GL work must happen on this thread
     }
     catch (const exception& e)
@@ -167,10 +188,11 @@ void RemeshViewer::draw_report()
 
     const ImGuiTableFlags flags =
         ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg;
-    if (ImGui::BeginTable("stats", 3, flags))
+    if (ImGui::BeginTable("stats", 4, flags))
     {
         ImGui::TableSetupColumn("");
         ImGui::TableSetupColumn("Input");
+        ImGui::TableSetupColumn("Projected");
         ImGui::TableSetupColumn("Output");
         // pmp uses black text on a light panel, but the header background would
         // stay dark, so give it a light one
@@ -184,7 +206,7 @@ void RemeshViewer::draw_report()
             ImGui::TableNextColumn();
             ImGui::TextUnformatted(label);
             for (const MeshMetrics* m :
-                 {&report_->input, &report_->output})
+                 {&report_->input, &report_->projected, &report_->output})
             {
                 ImGui::TableNextColumn();
                 ImGui::TextUnformatted(cell(*m).c_str());

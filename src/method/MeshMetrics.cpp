@@ -5,6 +5,7 @@
 #include <pmp/algorithms/differential_geometry.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <ostream>
 
@@ -60,6 +61,7 @@ MeshMetrics compute_mesh_metrics(const pmp::SurfaceMesh& mesh,
                                  float min_angle_threshold,
                                  float surface_tolerance)
 {
+    const auto t0 = chrono::high_resolution_clock::now();
     MeshMetrics m;
     m.n_vertices = mesh.n_vertices();
     m.n_faces = mesh.n_faces();
@@ -104,7 +106,8 @@ MeshMetrics compute_mesh_metrics(const pmp::SurfaceMesh& mesh,
                 p[i++] = mesh.position(v);
 
         const auto angles = triangle_angles(p[0], p[1], p[2]);
-        if (*min_element(angles.begin(), angles.end()) < min_angle_threshold)
+
+        if (*min_element(angles.begin(), angles.end()) < min_angle_threshold) 
             ++m.faces_with_small_angle;
     }
 
@@ -118,6 +121,9 @@ MeshMetrics compute_mesh_metrics(const pmp::SurfaceMesh& mesh,
         sum_sq += dev * dev;
     }
     m.area_deviation = static_cast<float>(sqrt(sum_sq));
+    m.computation_time =
+        chrono::duration<double>(chrono::high_resolution_clock::now() - t0)
+            .count();
 
     return m;
 }
@@ -126,20 +132,25 @@ void print_metrics(ostream& out, const string& label,
                    const MeshMetrics& m)
 {
     out << "=== " << label << " ===\n"
-        << "Vertices:                          " << m.n_vertices << '\n'
-        << "Triangles:                         " << m.n_faces << '\n'
-        << "Median triangle area:              " << m.median_area << '\n'
-        << "Triangles below median area:       " << m.faces_below_median_area
+        << "Total number of triangles: " << m.n_faces << '\n'
+        << "Total number of vertices: " << m.n_vertices << '\n'
+        << "Median Volume: " << m.median_area << '\n'
+        << "Triangles with volume less than median: "
+        << m.faces_below_median_area << '\n'
+        << "Triangles with at least one angle less than "
+        << m.min_angle_threshold << " degrees: " << m.faces_with_small_angle
         << '\n'
-        << "Area deviation from median (L2):   " << m.area_deviation << '\n'
-        << "Triangles with an angle < " << m.min_angle_threshold << " deg: "
-        << m.faces_with_small_angle << '\n'
-        << "Avg |f| at vertices:               " << m.avg_distance << '\n'
-        << "Max |f| at vertices:               " << m.max_distance << '\n'
-        << "Vertices with |f| > " << m.surface_tolerance << ":     "
-        << m.vertices_off_surface << '\n'
-        << "Regular (valence-6) interior:      " << m.regular_vertex_percentage
-        << "%\n";
+        << "Quadric Deviation from Median Volume: " << m.area_deviation
+        << '\n'
+        << "Average unsigned distance from implicit surface: "
+        << m.avg_distance << '\n'
+        << "Max unsigned distance from implicit surface: " << m.max_distance
+        << '\n'
+        << "Number of vertices NOT on the surface (tol > "
+        << m.surface_tolerance << "): " << m.vertices_off_surface << '\n'
+        << "Percentage of regular (valence-6) interior vertices: "
+        << m.regular_vertex_percentage << "%\n"
+        << "Metric computation time: " << m.computation_time << "s\n";
 }
 
 } // namespace iso

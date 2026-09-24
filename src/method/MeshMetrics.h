@@ -45,6 +45,8 @@ struct MeshMetrics
 
     //! Share of interior vertices with valence 6, in percent
     float regular_vertex_percentage = 0;
+
+    double computation_time = 0; //!< seconds spent computing these metrics
 };
 
 MeshMetrics compute_mesh_metrics(const pmp::SurfaceMesh& mesh,
