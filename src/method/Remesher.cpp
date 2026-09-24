@@ -11,8 +11,32 @@
 #include <array>
 #include <limits>
 #include <stdexcept>
+#include <unordered_set>
+#include <numeric>
 
 using namespace std;
+
+// Provide std::hash specializations for pmp::Vertex and pmp::Edge so the
+// unordered_set<Vertex> approach in kod.txt works identically.
+namespace std {
+template <>
+struct hash<pmp::Vertex>
+{
+    size_t operator()(const pmp::Vertex &v) const noexcept
+    {
+        return std::hash<int>()(v.idx());
+    }
+};
+
+template <>
+struct hash<pmp::Edge>
+{
+    size_t operator()(const pmp::Edge &e) const noexcept
+    {
+        return std::hash<int>()(e.idx());
+    }
+};
+} // namespace std
 
 namespace iso {
 
@@ -20,30 +44,20 @@ using namespace pmp;
 
 namespace {
 
-// Vertices on the mesh boundary, indexed by Vertex::idx(). Sized with
-// vertices_size(), not n_vertices(): the latter excludes deleted vertices, whose
-// slots still exist until garbage collection.
-vector<char> boundary_vertices(const SurfaceMesh& mesh)
-{
-    vector<char> locked(mesh.vertices_size(), 0);
-    for (auto e : mesh.edges())
-    {
-        if (mesh.is_boundary(e))
-        {
-            locked[mesh.vertex(e, 0).idx()] = 1;
-            locked[mesh.vertex(e, 1).idx()] = 1;
-        }
-    }
-    return locked;
-}
-
 float median_face_area(const SurfaceMesh& mesh)
 {
+    // Use sorting to compute the median (matches the kod.txt approach).
     vector<float> areas;
     areas.reserve(mesh.n_faces());
     for (auto f : mesh.faces())
         areas.push_back(face_area(mesh, f));
-    return median(std::move(areas));
+    if (areas.empty())
+        return 0.0f;
+    sort(areas.begin(), areas.end());
+    const size_t n = areas.size();
+    if (n % 2 == 0)
+        return 0.5f * (areas[n / 2 - 1] + areas[n / 2]);
+    return areas[n / 2];
 }
 
 Halfedge shortest_halfedge(const SurfaceMesh& mesh, Face f)
@@ -64,14 +78,26 @@ Halfedge shortest_halfedge(const SurfaceMesh& mesh, Face f)
 }
 
 // One sweep over all faces. Returns the number of collapses performed.
+// Forward declarations for helpers defined below (used by collapse_sweep)
+static std::vector<Vertex> getRingVertices(const SurfaceMesh& mesh, Vertex v);
+static pmp::Point getCentroid(const SurfaceMesh& mesh, const std::vector<Vertex>& verts);
+
 int collapse_sweep(SurfaceMesh& mesh, const ImplicitSurface& surface,
                    const RemeshOptions& options, float area_threshold)
 {
-    // Boundary vertices stay fixed for the whole run; vertices touched by a
-    // collapse are additionally locked until the next sweep.
-    vector<char> locked = boundary_vertices(mesh);
-    int collapses = 0;
+    // Match the kod.txt approach: maintain a set of disabled vertex indices
+    // (starts with boundary vertices) and reset it for each sweep.
+    std::unordered_set<int> disabled;
+    for (auto e : mesh.edges())
+    {
+        if (mesh.is_boundary(e))
+        {
+            disabled.insert(mesh.vertex(e, 0).idx());
+            disabled.insert(mesh.vertex(e, 1).idx());
+        }
+    }
 
+    int collapses = 0;
     for (Face f : mesh.faces())
     {
         array<Point, 3> p;
@@ -82,39 +108,59 @@ int collapse_sweep(SurfaceMesh& mesh, const ImplicitSurface& surface,
         const auto angles = triangle_angles(p[0], p[1], p[2]);
         const float min_angle = *min_element(angles.begin(), angles.end());
 
-        if (face_area(mesh, f) >= area_threshold &&
-            min_angle >= options.min_angle)
+        const float area = face_area(mesh, f);
+        if (!(area < area_threshold || min_angle < options.min_angle))
             continue;
 
         const Halfedge h = shortest_halfedge(mesh, f);
-        const Vertex from = mesh.from_vertex(h);
-        const Vertex kept = mesh.to_vertex(h); // survives the collapse
+        const Vertex v0 = mesh.from_vertex(h);
+        const Vertex v1 = mesh.to_vertex(h);
 
-        if (locked[from.idx()] || locked[kept.idx()])
+        if (disabled.count(v0.idx()) || disabled.count(v1.idx()))
             continue;
         if (!mesh.is_collapse_ok(h))
             continue;
 
+        // As in kod.txt, keep the 'old' vertex (the survivor) and collapse
+        Vertex old_v = mesh.to_vertex(h);
         mesh.collapse(h);
         ++collapses;
 
-        // Move the survivor to the centroid of its new neighbourhood, back
-        // onto the surface, and freeze that neighbourhood for this sweep.
-        Point centroid(0, 0, 0);
-        int n_ring = 0;
-        for (auto v : mesh.vertices(kept))
-        {
-            centroid += mesh.position(v);
-            locked[v.idx()] = 1;
-            ++n_ring;
-        }
-        locked[kept.idx()] = 1;
+        // Collect ring around the survivor and disable those vertices
+        std::vector<Vertex> ring = getRingVertices(mesh, old_v);
+        for (const Vertex& rv : ring)
+            disabled.insert(rv.idx());
+        disabled.insert(old_v.idx());
 
-        if (n_ring > 0)
-            mesh.position(kept) =
-                surface.project(centroid / static_cast<Scalar>(n_ring));
+        // Move survivor to centroid of the ring and project onto surface
+        Point centroid = getCentroid(mesh, ring);
+        Point new_p = surface.project(centroid);
+        mesh.position(old_v) = new_p;
     }
     return collapses;
+}
+
+// Helpers matching kod.txt behavior: ring vertices and centroid
+static std::vector<Vertex> getRingVertices(const SurfaceMesh& mesh, Vertex v)
+{
+    std::vector<Vertex> vertices;
+    for (auto he : mesh.halfedges(v))
+    {
+        Vertex vv = mesh.to_vertex(he);
+        if (vv != v)
+            vertices.push_back(vv);
+    }
+    return vertices;
+}
+
+static pmp::Point getCentroid(const SurfaceMesh& mesh, const std::vector<Vertex>& verts)
+{
+    pmp::Point centroid(0.0f, 0.0f, 0.0f);
+    for (const auto& v : verts)
+        centroid += mesh.position(v);
+    if (!verts.empty())
+        centroid /= static_cast<pmp::Scalar>(verts.size());
+    return centroid;
 }
 
 } // namespace

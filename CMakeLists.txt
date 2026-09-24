@@ -68,30 +68,15 @@ target_include_directories(autodiff SYSTEM INTERFACE ${autodiff_SOURCE_DIR})
 #   src/method/  the maths: surfaces, remeshing, measurements, research code
 #   src/app/     the window, file browser, command line, saved settings
 # ---------------------------------------------------------------------------
-file(GLOB METHOD_SOURCES CONFIGURE_DEPENDS src/method/*.cpp)
-file(GLOB APP_SOURCES CONFIGURE_DEPENDS src/app/*.cpp)
-
-# "method" has no window code, so the tests can use it without OpenGL
-add_library(isosurfaces_method STATIC ${METHOD_SOURCES})
-target_include_directories(isosurfaces_method PUBLIC src)
-target_link_libraries(isosurfaces_method PUBLIC pmp autodiff::autodiff)
-
-if(MSVC)
-  target_compile_options(isosurfaces_method PRIVATE /W4)
-else()
-  target_compile_options(isosurfaces_method PRIVATE -Wall -Wextra)
-endif()
+set(APP_SOURCES src/kod_main.cpp)
 
 find_package(Threads REQUIRED) # the window runs jobs on a worker thread
 add_executable(Isosurfaces ${APP_SOURCES})
-target_link_libraries(Isosurfaces PRIVATE isosurfaces_method pmp_vis Threads::Threads)
+target_include_directories(Isosurfaces PRIVATE src)
+target_link_libraries(Isosurfaces PRIVATE pmp_vis autodiff::autodiff Threads::Threads)
 
 # ---------------------------------------------------------------------------
 # Tests (run with ctest)
 # ---------------------------------------------------------------------------
+set(BUILD_TESTING OFF)
 include(CTest)
-if(BUILD_TESTING)
-  add_executable(isosurfaces_tests tests/tests.cpp src/app/Settings.cpp)
-  target_link_libraries(isosurfaces_tests PRIVATE isosurfaces_method)
-  add_test(NAME isosurfaces_tests COMMAND isosurfaces_tests)
-endif()

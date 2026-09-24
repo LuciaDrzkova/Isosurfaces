@@ -10,6 +10,9 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <sstream>
+#include <iomanip>
+#include <limits>
 
 using namespace std;
 namespace fs = filesystem;
@@ -31,6 +34,26 @@ string format(const char* fmt, Args... args)
     char buffer[64];
     snprintf(buffer, sizeof buffer, fmt, args...);
     return buffer;
+}
+
+// Full-precision formatting (no rounding) for detailed block below the table
+template <typename T>
+string full_format(const char* fmt, T value)
+{
+    // Use ostringstream to allow scientific or fixed notation depending on value
+    std::ostringstream oss;
+    if (std::is_floating_point<T>::value)
+    {
+        // choose maximum precision for double
+        oss << std::setprecision(std::numeric_limits<T>::max_digits10);
+        // let stream decide between fixed and scientific
+        oss << value;
+    }
+    else
+    {
+        oss << value;
+    }
+    return oss.str();
 }
 
 } // namespace
@@ -165,38 +188,45 @@ void RemeshViewer::draw_report()
     if (!report_)
         return;
 
-    const ImGuiTableFlags flags =
-        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg;
-    if (ImGui::BeginTable("stats", 3, flags))
+    const ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg;
+    // Show Input / Projected / Output side-by-side
+    if (ImGui::BeginTable("stats", 4, flags))
     {
         ImGui::TableSetupColumn("");
         ImGui::TableSetupColumn("Input");
+        ImGui::TableSetupColumn("Projected");
         ImGui::TableSetupColumn("Output");
-        // pmp uses black text on a light panel, but the header background would
-        // stay dark, so give it a light one
-        ImGui::PushStyleColor(ImGuiCol_TableHeaderBg,
-                              ImVec4(0.78f, 0.87f, 0.98f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_TableHeaderBg, ImVec4(0.78f, 0.87f, 0.98f, 1.0f));
         ImGui::TableHeadersRow();
         ImGui::PopStyleColor();
 
+        // helper to add a row with the same label and three cells
         auto row = [&](const char* label, auto&& cell) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::TextUnformatted(label);
-            for (const MeshMetrics* m :
-                 {&report_->input, &report_->output})
+            for (const MeshMetrics* m : {&report_->input, &report_->projected, &report_->output})
             {
                 ImGui::TableNextColumn();
                 ImGui::TextUnformatted(cell(*m).c_str());
             }
         };
 
+        // dynamic labels that include thresholds from the report (use input as representative)
+        const string angle_label = format("Triangles with an angle < %.0f deg", report_->input.min_angle_threshold);
+        const string tol_label = format("Vertices with |f| > %.1e", report_->input.surface_tolerance);
+
         row("Vertices", [](const MeshMetrics& m) { return format("%zu", m.n_vertices); });
         row("Triangles", [](const MeshMetrics& m) { return format("%zu", m.n_faces); });
+        row("Median triangle area", [](const MeshMetrics& m) { return format("%.6g", m.median_area); });
+        row("Triangles below median area", [](const MeshMetrics& m) { return format("%zu", m.faces_below_median_area); });
+        row("Area deviation (L2)", [](const MeshMetrics& m) { return format("%.6g", m.area_deviation); });
+        row(angle_label.c_str(), [](const MeshMetrics& m) { return format("%zu", m.faces_with_small_angle); });
         row("Avg |f|", [](const MeshMetrics& m) { return format("%.2e", m.avg_distance); });
         row("Max |f|", [](const MeshMetrics& m) { return format("%.2e", m.max_distance); });
-        row("Skinny tris", [](const MeshMetrics& m) { return format("%zu", m.faces_with_small_angle); });
-        row("Regular verts", [](const MeshMetrics& m) { return format("%.1f%%", m.regular_vertex_percentage); });
+        row(tol_label.c_str(), [](const MeshMetrics& m) { return format("%zu", m.vertices_off_surface); });
+        row("Regular (valence-6) interior (%)", [](const MeshMetrics& m) { return format("%.1f%%", m.regular_vertex_percentage); });
+
         ImGui::EndTable();
     }
 
@@ -213,6 +243,32 @@ void RemeshViewer::draw_report()
         ImGui::TextWrapped("%s", report_->experiment_log.c_str());
     }
     ImGui::TextDisabled("Saved to %s", job_output_.c_str());
+
+    // Detailed full-precision metrics block (Input / Projected / Output)
+    ImGui::Separator();
+    ImGui::TextUnformatted("Detailed metrics (full precision):");
+    auto print_block = [&](const char* title, const MeshMetrics& m) {
+        ImGui::TextUnformatted(title);
+        ImGui::SameLine();
+        ImGui::NewLine();
+        ImGui::TextUnformatted((string("Total number of triangles: ") + full_format("%zu", m.n_faces)).c_str());
+        ImGui::TextUnformatted((string("Total number of vertices: ") + full_format("%zu", m.n_vertices)).c_str());
+        ImGui::TextUnformatted((string("Median triangle area: ") + full_format("%f", m.median_area)).c_str());
+        ImGui::TextUnformatted((string("Triangles below median area: ") + full_format("%zu", m.faces_below_median_area)).c_str());
+        ImGui::TextUnformatted((string("Area deviation (L2): ") + full_format("%f", m.area_deviation)).c_str());
+        ImGui::TextUnformatted((string("Triangles with an angle < ") + full_format("%f", m.min_angle_threshold) + string(" deg: ") + full_format("%zu", m.faces_with_small_angle)).c_str());
+        ImGui::TextUnformatted((string("Avg |f| at vertices: ") + full_format("%f", m.avg_distance)).c_str());
+        ImGui::TextUnformatted((string("Max |f| at vertices: ") + full_format("%f", m.max_distance)).c_str());
+        ImGui::TextUnformatted((string("Vertices with |f| > ") + full_format("%f", m.surface_tolerance) + string(": ") + full_format("%zu", m.vertices_off_surface)).c_str());
+        ImGui::TextUnformatted((string("Regular (valence-6) interior: ") + full_format("%f", m.regular_vertex_percentage) + string("%")) .c_str());
+        ImGui::NewLine();
+    };
+
+    ImGui::BeginChild("detailed_metrics", ImVec2(0, 300), true);
+    print_block("=== INPUT MESH ===", report_->input);
+    print_block("=== PROJECTED MESH ===", report_->projected);
+    print_block("=== OUTPUT MESH ===", report_->output);
+    ImGui::EndChild();
 }
 
 void RemeshViewer::draw_setup_dialog()
