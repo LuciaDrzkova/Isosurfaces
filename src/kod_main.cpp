@@ -155,10 +155,14 @@ T implicitFunctionImpl(T x, T y, T z)
     //return x * x + y * y + z * z + 0.1 * cos(4 * x) + 0.1 * cos(4 * y) + 0.1 * cos(4 * z) - 5; // weird_blobby_shape.obj
     //return -(cos(x + y) * cos(y + z) * cos(z + x) - 0.5); // wavy_network
     //return abs(sin(x) + sin(y) + sin(z)) - 1.2 + 0.5 * cos(3 * x * y * z); // Frozen_Lattice_Shard
-    return pow((x *x + y *y + z *z - 1) , 2) - 0.3 * cos(6 * atan2(y, x)) * exp(-z *z); // Lotus_Form
+    //return pow((x *x + y *y + z *z - 1) , 2) - 0.3 * cos(6 * atan2(y, x)) * exp(-z *z); // Lotus_Form
     //return x *x + y *y + z *z + 0.81 * sin(6 * (x + y + z)) - 1; // wavz_shell
     //return x * x + y * y - z * z; // cone: singular ONLY at origin (0,0,0) - use this to sanity-check the singularity detector
     //moebius_3D_surface
+    //return x*x-y*y*z; // Whitney_umbrella.obj
+    // return x*x*y*y+y*y*z*z+x*x*z*z-x*y*z; // Devil's_Surface.obj
+    // return x*x+y*y*z; // half umbrella.obj
+    ((x*xy*y+z*z-1)*(x*xy*y+z*z-1))-z*z; // two_spheres.obj
 }
 
 // Thin wrapper preserving the original signature/call sites (used by
@@ -582,7 +586,7 @@ int main(int argc, char **argv)
     SurfaceMesh mymesh;
 
     // Accept input filename from argv, fallback to bundled test meshes
-    const char *input_name = "assets/mesh_catalog/Lotus_Form.obj";
+    const char *input_name = "assets/mesh_catalog/Whitney_umbrella.obj";
     if (argc > 1)
         input_name = argv[1];
 
