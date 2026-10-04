@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(Isosurfaces LANGUAGES CXX)
+project(IsosurfacesResearch LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -62,18 +62,25 @@ add_library(autodiff::autodiff ALIAS autodiff)
 target_include_directories(autodiff SYSTEM INTERFACE ${autodiff_SOURCE_DIR})
 
 # ---------------------------------------------------------------------------
-# The program. New .cpp files in src/method/ or src/app/ are picked up
-# automatically (re-run "cmake -S . -B build", or just build again).
-#
-#   src/method/  the maths: surfaces, remeshing, measurements, research code
-#   src/app/     the window, file browser, command line, saved settings
+# Core Research Library (INTERFACE)
+# Reusable components: implicit surfaces, gradient/Hessian, metrics, extraction
+#   include/          header-only libraries for research logic
+#   src/              implementation and executable code
 # ---------------------------------------------------------------------------
-set(APP_SOURCES src/kod_main.cpp)
+add_library(iso_research INTERFACE)
+target_include_directories(iso_research INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(iso_research INTERFACE pmp autodiff::autodiff)
 
+# ---------------------------------------------------------------------------
+# Main Executable: Parameter sweep and metrics collection
+# ---------------------------------------------------------------------------
 find_package(Threads REQUIRED) # the window runs jobs on a worker thread
-add_executable(Isosurfaces ${APP_SOURCES})
-target_include_directories(Isosurfaces PRIVATE src)
-target_link_libraries(Isosurfaces PRIVATE pmp_vis autodiff::autodiff Threads::Threads)
+add_executable(Isosurfaces src/main.cpp)
+target_include_directories(Isosurfaces PRIVATE src include)
+target_link_libraries(Isosurfaces PRIVATE iso_research pmp_vis Threads::Threads)
 
 # ---------------------------------------------------------------------------
 # Tests (run with ctest)
