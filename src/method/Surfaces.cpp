@@ -97,7 +97,12 @@ dual wavy_shell(dual x, dual y, dual z)
     return x * x + y * y + z * z + 0.81 * sin(6 * (x + y + z)) - 1;
 }
 
+dual cone(dual x, dual y, dual z)
+{
+    return x * x + y * y - z * z;   
+
 } // namespace
+}
 
 // --- The list of all surfaces (name, description, formula) ----------------
 
@@ -119,6 +124,7 @@ const vector<ImplicitSurface>& builtin_surfaces()
         {"lotus", "(x^2 + y^2 + z^2 - 1)^2 = 0.3 cos(6 atan2(y,x)) exp(-z^2)",
          lotus},
         {"wavy_shell", "x^2 + y^2 + z^2 + 0.81 sin(6(x+y+z)) = 1", wavy_shell},
+        {"cone", "x^2 + y^2 - z^2 = 0", cone},
     };
     return surfaces;
 }
