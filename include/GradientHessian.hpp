@@ -1,85 +1,144 @@
 #pragma once
 
 #include "ImplicitSurface.hpp"
-#include <Eigen/Dense>
-#include <autodiff/forward/dual.hpp>
-#include <pmp/types.h>
-#include <cmath>
 
-class GradientHessianCalculator {
+#include <Eigen/Dense>
+#include <pmp/types.h>
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
+// Numerical derivative helper used by code paths that operate on arbitrary
+// ImplicitSurface implementations. The specialized cone/quadric derivative
+// routines live on ParameterizedConeQuadric itself.
+class GradientHessianCalculator
+{
 private:
     const ImplicitSurface& surface_;
 
-public:
-    explicit GradientHessianCalculator(const ImplicitSurface& surf) : surface_(surf) {}
-
-    // Compute 3D Gradient using forward-mode autodiff
-    pmp::Point computeGradient(const pmp::Point& p) const {
-        using namespace autodiff;
-        dual x = p[0], y = p[1], z = p[2];
-
-        auto eval_fn = [this](dual x_val, dual y_val, dual z_val) {
-            // Cast to ParameterizedConeQuadric for template access
-            const ParameterizedConeQuadric* quad = 
-                dynamic_cast<const ParameterizedConeQuadric*>(&surface_);
-            if (quad) return quad->evalTemplate(x_val, y_val, z_val);
-            
-            // Fallback: use numerical gradient
-            return dual(0.0);
-        };
-
-        double dx = derivative(eval_fn, wrt(x), at(x, y, z));
-        double dy = derivative(eval_fn, wrt(y), at(x, y, z));
-        double dz = derivative(eval_fn, wrt(z), at(x, y, z));
-
-        return pmp::Point(static_cast<float>(dx), static_cast<float>(dy), static_cast<float>(dz));
+    double step(double x, double y, double z) const
+    {
+        const double scale = std::max(
+            1.0,
+            std::sqrt(x * x + y * y + z * z));
+        return 1e-6 * scale;
     }
 
-    // Compute 3x3 Hessian using dual2nd second-order autodiff
-    Eigen::Matrix3d computeHessian(const pmp::Point& p) const {
-        using namespace autodiff;
-        dual2nd x = p[0], y = p[1], z = p[2];
+public:
+    explicit GradientHessianCalculator(const ImplicitSurface& surface)
+        : surface_(surface)
+    {
+    }
 
-        auto eval_fn = [this](dual2nd x_val, dual2nd y_val, dual2nd z_val) {
-            const ParameterizedConeQuadric* quad = 
-                dynamic_cast<const ParameterizedConeQuadric*>(&surface_);
-            if (quad) return quad->evalTemplate(x_val, y_val, z_val);
-            return dual2nd(0.0);
-        };
+    pmp::Point computeGradient(const pmp::Point& p) const
+    {
+        const double x = static_cast<double>(p[0]);
+        const double y = static_cast<double>(p[1]);
+        const double z = static_cast<double>(p[2]);
+        const double h = step(x, y, z);
 
-        double Hxx = derivative(eval_fn, wrt(x, x), at(x, y, z));
-        double Hyy = derivative(eval_fn, wrt(y, y), at(x, y, z));
-        double Hzz = derivative(eval_fn, wrt(z, z), at(x, y, z));
-        double Hxy = derivative(eval_fn, wrt(x, y), at(x, y, z));
-        double Hxz = derivative(eval_fn, wrt(x, z), at(x, y, z));
-        double Hyz = derivative(eval_fn, wrt(y, z), at(x, y, z));
+        const double dx =
+            (surface_.eval(x + h, y, z) -
+             surface_.eval(x - h, y, z)) /
+            (2.0 * h);
+        const double dy =
+            (surface_.eval(x, y + h, z) -
+             surface_.eval(x, y - h, z)) /
+            (2.0 * h);
+        const double dz =
+            (surface_.eval(x, y, z + h) -
+             surface_.eval(x, y, z - h)) /
+            (2.0 * h);
 
-        Eigen::Matrix3d H;
-        H << Hxx, Hxy, Hxz,
-             Hxy, Hyy, Hyz,
-             Hxz, Hyz, Hzz;
+        return pmp::Point(
+            static_cast<float>(dx),
+            static_cast<float>(dy),
+            static_cast<float>(dz));
+    }
+
+    Eigen::Matrix3d computeHessian(const pmp::Point& p) const
+    {
+        const double x = static_cast<double>(p[0]);
+        const double y = static_cast<double>(p[1]);
+        const double z = static_cast<double>(p[2]);
+        const double h = 1e-4 *
+            std::max(1.0, std::sqrt(x * x + y * y + z * z));
+        const double h2 = h * h;
+
+        const double f000 = surface_.eval(x, y, z);
+        Eigen::Matrix3d H = Eigen::Matrix3d::Zero();
+
+        H(0, 0) =
+            (surface_.eval(x + h, y, z) - 2.0 * f000 +
+             surface_.eval(x - h, y, z)) /
+            h2;
+        H(1, 1) =
+            (surface_.eval(x, y + h, z) - 2.0 * f000 +
+             surface_.eval(x, y - h, z)) /
+            h2;
+        H(2, 2) =
+            (surface_.eval(x, y, z + h) - 2.0 * f000 +
+             surface_.eval(x, y, z - h)) /
+            h2;
+
+        H(0, 1) = H(1, 0) =
+            (surface_.eval(x + h, y + h, z) -
+             surface_.eval(x + h, y - h, z) -
+             surface_.eval(x - h, y + h, z) +
+             surface_.eval(x - h, y - h, z)) /
+            (4.0 * h2);
+
+        H(0, 2) = H(2, 0) =
+            (surface_.eval(x + h, y, z + h) -
+             surface_.eval(x + h, y, z - h) -
+             surface_.eval(x - h, y, z + h) +
+             surface_.eval(x - h, y, z - h)) /
+            (4.0 * h2);
+
+        H(1, 2) = H(2, 1) =
+            (surface_.eval(x, y + h, z + h) -
+             surface_.eval(x, y + h, z - h) -
+             surface_.eval(x, y - h, z + h) +
+             surface_.eval(x, y - h, z - h)) /
+            (4.0 * h2);
+
         return H;
     }
 
-    // Newton-Raphson projection to calculate true Euclidean distance to the implicit surface
-    pmp::Point projectOntoSurface(pmp::Point p, int max_iterations = 15, float tolerance = 1e-7f) const {
-        for (int i = 0; i < max_iterations; ++i) {
-            double val = surface_.eval(p[0], p[1], p[2]);
-            if (std::abs(val) < tolerance) break;
+    // Newton projection onto f(x,y,z)=0.
+    bool projectOntoSurface(
+        pmp::Point& p,
+        double tolerance = 1e-10,
+        std::size_t iterations = 12) const
+    {
+        for (std::size_t i = 0; i < iterations; ++i)
+        {
+            const double x = static_cast<double>(p[0]);
+            const double y = static_cast<double>(p[1]);
+            const double z = static_cast<double>(p[2]);
+            const double value = surface_.eval(x, y, z);
 
-            pmp::Point grad = computeGradient(p);
-            float grad_sqnorm = pmp::dot(grad, grad);
+            if (std::abs(value) <= tolerance)
+                return true;
 
-            if (grad_sqnorm < 1e-12f) break; // Avoid division by zero near singularities
+            const pmp::Point g = computeGradient(p);
+            const double gx = static_cast<double>(g[0]);
+            const double gy = static_cast<double>(g[1]);
+            const double gz = static_cast<double>(g[2]);
+            const double norm2 = gx * gx + gy * gy + gz * gz;
 
-            p = p - (static_cast<float>(val) / grad_sqnorm) * grad;
+            if (norm2 <= std::numeric_limits<double>::epsilon())
+                return false;
+
+            p[0] = static_cast<float>(x - value * gx / norm2);
+            p[1] = static_cast<float>(y - value * gy / norm2);
+            p[2] = static_cast<float>(z - value * gz / norm2);
         }
-        return p;
-    }
 
-    // Exact Euclidean distance via projectOntoSurface
-    float computeEuclideanDistance(const pmp::Point& p) const {
-        pmp::Point p_proj = projectOntoSurface(p);
-        return pmp::distance(p, p_proj);
+        return std::abs(surface_.eval(
+            static_cast<double>(p[0]),
+            static_cast<double>(p[1]),
+            static_cast<double>(p[2]))) <= tolerance;
     }
 };

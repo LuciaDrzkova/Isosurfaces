@@ -1,12 +1,8 @@
 #pragma once
 
 #include <Eigen/Dense>
-#include <autodiff/forward/dual.hpp>
 
-// -----------------------------------------------------------------------------
-// Base interface for implicit surfaces
-// -----------------------------------------------------------------------------
-
+// Base interface for scalar implicit surfaces f(x,y,z)=0.
 class ImplicitSurface
 {
 public:
@@ -18,40 +14,16 @@ public:
         double z) const = 0;
 };
 
-// -----------------------------------------------------------------------------
-// Parameterized cone / quadric
-//
+// Parameterized quadric used throughout the experiments:
 //     f(x,y,z) = x^2 + y^2 - z^2 - c
 //
-// For c = 0:
-//
-//     f(x,y,z) = x^2 + y^2 - z^2
-//
-// The singular point is:
-//
-//     p = (0,0,0)
-//
-// Gradient:
-//
-//     grad f = (2x, 2y, -2z)
-//
-// Hessian:
-//
-//     H = [ 2  0  0 ]
-//         [ 0  2  0 ]
-//         [ 0  0 -2 ]
-//
-// Hessian determinant:
-//
-//     det(H) = -8
-//
-// Therefore the origin is a NON-DEGENERATE critical point.
-// -----------------------------------------------------------------------------
-
+// c < 0 : two-sheet hyperboloid
+// c = 0 : double cone with a non-degenerate Morse saddle at the origin
+// c > 0 : one-sheet hyperboloid
 class ParameterizedConeQuadric : public ImplicitSurface
 {
 private:
-    double c_;
+    double c_ = 0.0;
 
 public:
     explicit ParameterizedConeQuadric(double c = 0.0)
@@ -69,10 +41,6 @@ public:
         return c_;
     }
 
-    // -------------------------------------------------------------------------
-    // Implicit function
-    // -------------------------------------------------------------------------
-
     double eval(
         double x,
         double y,
@@ -80,10 +48,6 @@ public:
     {
         return x * x + y * y - z * z - c_;
     }
-
-    // -------------------------------------------------------------------------
-    // Exact analytic gradient
-    // -------------------------------------------------------------------------
 
     Eigen::Vector3d gradient(
         double x,
@@ -96,29 +60,17 @@ public:
             -2.0 * z);
     }
 
-    // -------------------------------------------------------------------------
-    // Exact analytic Hessian
-    //
-    // It does not depend on x, y or z for this quadratic.
-    // -------------------------------------------------------------------------
-
     Eigen::Matrix3d hessian(
         double,
         double,
         double) const
     {
         Eigen::Matrix3d H;
-
         H << 2.0, 0.0, 0.0,
              0.0, 2.0, 0.0,
              0.0, 0.0, -2.0;
-
         return H;
     }
-
-    // -------------------------------------------------------------------------
-    // Exact Hessian determinant
-    // -------------------------------------------------------------------------
 
     double hessianDeterminant(
         double x,
@@ -128,15 +80,8 @@ public:
         return hessian(x, y, z).determinant();
     }
 
-    // -------------------------------------------------------------------------
-    // Template version retained for the existing autodiff infrastructure.
-    // -------------------------------------------------------------------------
-
     template <typename T>
-    T evalTemplate(
-        T x,
-        T y,
-        T z) const
+    T evalTemplate(T x, T y, T z) const
     {
         return x * x + y * y - z * z - c_;
     }

@@ -1,7 +1,7 @@
 #include "ImplicitSurface.hpp"
-#include "SingularityDetector.hpp"
-#include "MarchingCubes.hpp"
 #include "LocalUnfolder.hpp"
+#include "MarchingCubes.hpp"
+#include "SingularityDetector.hpp"
 #include "app/MyViewer.h"
 
 #include <pmp/io/io.h>
@@ -9,19 +9,22 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <queue>
 #include <set>
 #include <sstream>
-#include <stdexcept>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
+
+namespace
+{
 
 const char* singularity_type_name(SingularityType type)
 {
@@ -37,30 +40,38 @@ const char* singularity_type_name(SingularityType type)
     return "Unknown";
 }
 
+const char* region_mode_name(LocalUnfolder::RegionMode mode)
+{
+    return mode == LocalUnfolder::RegionMode::Sphere
+        ? "sphere"
+        : "topological-BFS";
+}
+
 void write_colored_ply(
     const pmp::SurfaceMesh& mesh,
     const std::vector<pmp::Color>& vertex_colors,
     const std::string& filename)
 {
-    auto points =
-        mesh.get_vertex_property<pmp::Point>("v:point");
+    if (vertex_colors.size() != mesh.n_vertices())
+        throw std::runtime_error("Vertex/color count mismatch while writing PLY");
 
+    const auto points = mesh.get_vertex_property<pmp::Point>("v:point");
     std::ofstream out(filename);
-    if (!out.is_open())
+    if (!out)
         throw std::runtime_error("Could not open PLY output file: " + filename);
 
-    out << "ply\n";
-    out << "format ascii 1.0\n";
-    out << "element vertex " << mesh.n_vertices() << "\n";
-    out << "property float x\n";
-    out << "property float y\n";
-    out << "property float z\n";
-    out << "property uchar red\n";
-    out << "property uchar green\n";
-    out << "property uchar blue\n";
-    out << "element face " << mesh.n_faces() << "\n";
-    out << "property list uchar int vertex_indices\n";
-    out << "end_header\n";
+    out << "ply\n"
+        << "format ascii 1.0\n"
+        << "element vertex " << mesh.n_vertices() << "\n"
+        << "property float x\n"
+        << "property float y\n"
+        << "property float z\n"
+        << "property uchar red\n"
+        << "property uchar green\n"
+        << "property uchar blue\n"
+        << "element face " << mesh.n_faces() << "\n"
+        << "property list uchar int vertex_indices\n"
+        << "end_header\n";
 
     for (auto v : mesh.vertices())
     {
@@ -106,31 +117,37 @@ EdgeKey make_edge(iso::mc::Index a, iso::mc::Index b)
 struct EdgeStatistics
 {
     std::size_t boundary_edges = 0;
+    std::size_t boundary_vertices = 0;
     std::size_t nonmanifold_edges = 0;
 };
 
-EdgeStatistics compute_edge_statistics(const iso::mc::Mesh& extracted)
+EdgeStatistics compute_edge_statistics(const iso::mc::Mesh& mesh)
 {
-    std::map<EdgeKey, std::size_t> edge_use;
-
-    for (const auto& triangle : extracted.triangles)
+    std::map<EdgeKey, std::size_t> uses;
+    for (const auto& t : mesh.triangles)
     {
-        ++edge_use[make_edge(triangle[0], triangle[1])];
-        ++edge_use[make_edge(triangle[1], triangle[2])];
-        ++edge_use[make_edge(triangle[2], triangle[0])];
+        ++uses[make_edge(t[0], t[1])];
+        ++uses[make_edge(t[1], t[2])];
+        ++uses[make_edge(t[2], t[0])];
     }
 
-    EdgeStatistics statistics;
-    for (const auto& entry : edge_use)
+    std::set<iso::mc::Index> boundary_vertices;
+    EdgeStatistics result;
+    for (const auto& [edge, count] : uses)
     {
-        const std::size_t uses = entry.second;
-        if (uses == 1)
-            ++statistics.boundary_edges;
-        else if (uses > 2)
-            ++statistics.nonmanifold_edges;
+        if (count == 1)
+        {
+            ++result.boundary_edges;
+            boundary_vertices.insert(edge.first);
+            boundary_vertices.insert(edge.second);
+        }
+        else if (count > 2)
+        {
+            ++result.nonmanifold_edges;
+        }
     }
-
-    return statistics;
+    result.boundary_vertices = boundary_vertices.size();
+    return result;
 }
 
 std::vector<int> compute_connected_components(
@@ -142,34 +159,32 @@ std::vector<int> compute_connected_components(
 
     for (auto start : mesh.vertices())
     {
-        const int start_id = start.idx();
-        if (component[start_id] != -1)
+        if (component[start.idx()] != -1)
             continue;
 
-        const int current_component = component_count++;
+        const int id = component_count++;
         std::queue<pmp::Vertex> queue;
         queue.push(start);
-        component[start_id] = current_component;
+        component[start.idx()] = id;
 
-        std::size_t component_size = 0;
+        std::size_t size = 0;
         while (!queue.empty())
         {
             const pmp::Vertex v = queue.front();
             queue.pop();
-            ++component_size;
+            ++size;
 
             for (auto vv : mesh.vertices(v))
             {
-                const int vv_id = vv.idx();
-                if (component[vv_id] == -1)
+                if (component[vv.idx()] == -1)
                 {
-                    component[vv_id] = current_component;
+                    component[vv.idx()] = id;
                     queue.push(vv);
                 }
             }
         }
 
-        component_sizes.push_back(component_size);
+        component_sizes.push_back(size);
     }
 
     return component;
@@ -189,21 +204,20 @@ CoincidentStatistics compute_coincident_statistics(const pmp::SurfaceMesh& mesh)
     for (auto v : mesh.vertices())
     {
         const pmp::Point p = mesh.position(v);
-        groups[PositionKey(p[0], p[1], p[2])].push_back(v.idx());
+        groups[{p[0], p[1], p[2]}].push_back(v.idx());
     }
 
-    CoincidentStatistics statistics;
-    for (const auto& entry : groups)
+    CoincidentStatistics result;
+    for (const auto& [key, ids] : groups)
     {
-        const auto& ids = entry.second;
+        (void)key;
         if (ids.size() > 1)
         {
-            ++statistics.groups;
-            statistics.extra_vertices += ids.size() - 1;
+            ++result.groups;
+            result.extra_vertices += ids.size() - 1;
         }
     }
-
-    return statistics;
+    return result;
 }
 
 struct GeometricSingularity
@@ -217,10 +231,9 @@ struct GeometricSingularity
 
 std::vector<GeometricSingularity> group_geometric_singularities(
     const pmp::SurfaceMesh& mesh,
-    const std::vector<SingularityClassificationResult>& results)
+    const std::vector<SingularityClassificationResult>& results,
+    double position_tolerance = 1e-8)
 {
-    constexpr double position_tolerance = 1e-8;
-
     std::vector<int> singular_vertices;
     for (auto v : mesh.vertices())
     {
@@ -252,15 +265,13 @@ std::vector<GeometricSingularity> group_geometric_singularities(
                 continue;
 
             const int candidate_id = singular_vertices[j];
-            const pmp::Point candidate =
-                mesh.position(pmp::Vertex(candidate_id));
-
+            const pmp::Point candidate = mesh.position(pmp::Vertex(candidate_id));
             const double dx = static_cast<double>(candidate[0] - seed[0]);
             const double dy = static_cast<double>(candidate[1] - seed[1]);
             const double dz = static_cast<double>(candidate[2] - seed[2]);
-            const double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+            const double d = std::sqrt(dx * dx + dy * dy + dz * dz);
 
-            if (distance <= position_tolerance)
+            if (d <= position_tolerance)
             {
                 group.representative_vertices.push_back(candidate_id);
                 assigned[j] = true;
@@ -270,7 +281,6 @@ std::vector<GeometricSingularity> group_geometric_singularities(
         pmp::Point center(0.0f, 0.0f, 0.0f);
         for (int id : group.representative_vertices)
             center += mesh.position(pmp::Vertex(id));
-
         center /= static_cast<float>(group.representative_vertices.size());
         group.center = center;
         groups.push_back(std::move(group));
@@ -279,55 +289,41 @@ std::vector<GeometricSingularity> group_geometric_singularities(
     return groups;
 }
 
-struct ClassificationCounts
+pmp::SurfaceMesh to_pmp_mesh(const iso::mc::Mesh& source)
 {
-    std::size_t regular = 0;
-    std::size_t nondegenerate = 0;
-    std::size_t degenerate = 0;
-};
+    pmp::SurfaceMesh mesh;
+    std::vector<pmp::Vertex> vertices;
+    vertices.reserve(source.vertices.size());
 
-ClassificationCounts classify_mesh_counts(
-    const pmp::SurfaceMesh& mesh,
-    const SingularityDetector& detector)
-{
-    ClassificationCounts counts;
-
-    for (auto v : mesh.vertices())
+    for (const auto& p : source.vertices)
     {
-        const auto result = detector.classifyPoint(mesh.position(v));
-        switch (result.type)
-        {
-        case SingularityType::Regular:
-            ++counts.regular;
-            break;
-        case SingularityType::NonDegenerateSingular:
-            ++counts.nondegenerate;
-            break;
-        case SingularityType::DegenerateSingular:
-            ++counts.degenerate;
-            break;
-        }
+        vertices.push_back(mesh.add_vertex(
+            pmp::Point(
+                static_cast<float>(p[0]),
+                static_cast<float>(p[1]),
+                static_cast<float>(p[2]))));
     }
 
-    return counts;
+    for (const auto& triangle : source.triangles)
+    {
+        mesh.add_triangle(
+            vertices[triangle[0]],
+            vertices[triangle[1]],
+            vertices[triangle[2]]);
+    }
+    return mesh;
 }
 
 void print_topology_report(
     const iso::mc::Mesh& extracted,
     const pmp::SurfaceMesh& mesh,
     const std::vector<std::size_t>& component_sizes,
-    const ClassificationCounts& classification)
+    const std::vector<GeometricSingularity>& singularities,
+    std::size_t regular_count,
+    std::size_t nondegenerate_count,
+    std::size_t degenerate_count)
 {
-    std::cout
-        << "\n========================================================\n"
-        << "  MESH TOPOLOGY DIAGNOSTICS\n"
-        << "========================================================\n";
-
-    std::cout << "Vertices           : " << mesh.n_vertices() << '\n';
-    std::cout << "Edges              : " << mesh.n_edges() << '\n';
-    std::cout << "Triangles          : " << mesh.n_faces() << '\n';
-
-    const EdgeStatistics edge_statistics = compute_edge_statistics(extracted);
+    const EdgeStatistics edges = compute_edge_statistics(extracted);
 
     std::size_t pmp_boundary_edges = 0;
     for (auto e : mesh.edges())
@@ -343,63 +339,47 @@ void print_topology_report(
             ++nonmanifold_vertices;
     }
 
-    const CoincidentStatistics coincident =
-        compute_coincident_statistics(mesh);
+    const CoincidentStatistics coincident = compute_coincident_statistics(mesh);
 
-    std::cout << "\nBoundary edges      : "
-              << edge_statistics.boundary_edges << '\n';
-    std::cout << "PMP boundary edges  : "
-              << pmp_boundary_edges << '\n';
-    std::cout << "Non-manifold edges  : "
-              << edge_statistics.nonmanifold_edges << '\n';
-    std::cout << "Non-manifold vertices: "
-              << nonmanifold_vertices << '\n';
+    std::cout
+        << "\n========================================================\n"
+        << "  MESH TOPOLOGY + SINGULARITY REPORT\n"
+        << "========================================================\n"
+        << "Vertices            : " << mesh.n_vertices() << '\n'
+        << "Edges               : " << mesh.n_edges() << '\n'
+        << "Triangles           : " << mesh.n_faces() << '\n'
+        << "Global surface boundary edges   : " << edges.boundary_edges << '\n'
+        << "Global surface boundary vertices: " << edges.boundary_vertices << '\n'
+        << "PMP boundary edges  : " << pmp_boundary_edges << '\n'
+        << "Non-manifold edges  : " << edges.nonmanifold_edges << '\n'
+        << "Non-manifold vertices: " << nonmanifold_vertices << '\n'
+        << "Connected components : " << component_sizes.size() << '\n';
 
-    std::cout << "Singular vertices   : "
-              << classification.nondegenerate + classification.degenerate
-              << " (NonDegenerate: "
-              << classification.nondegenerate
-              << ", Degenerate: "
-              << classification.degenerate
-              << ")\n";
-
-    std::cout << "Connected components : "
-              << component_sizes.size() << '\n';
     for (std::size_t i = 0; i < component_sizes.size(); ++i)
+        std::cout << "  Component " << i << " vertices: " << component_sizes[i] << '\n';
+
+    std::cout
+        << "Coincident vertex groups: " << coincident.groups << '\n'
+        << "Coincident extra vertices: " << coincident.extra_vertices << '\n'
+        << "Regular vertices     : " << regular_count << '\n'
+        << "Nondegenerate singular vertices: " << nondegenerate_count << '\n'
+        << "Degenerate singular vertices    : " << degenerate_count << '\n'
+        << "Geometric singularity groups    : " << singularities.size() << '\n';
+
+    for (std::size_t i = 0; i < singularities.size(); ++i)
     {
-        std::cout << "  Component " << i
-                  << " vertices: " << component_sizes[i] << '\n';
+        const auto& s = singularities[i];
+        std::cout
+            << "  Singularity " << i
+            << " center=(" << s.center[0] << ", " << s.center[1] << ", " << s.center[2] << ")"
+            << " type=" << singularity_type_name(s.type)
+            << " mesh_representatives=" << s.representative_vertices.size()
+            << " det(H)=" << s.hessian_determinant
+            << " eigenvalues=(" << s.eigenvalues[0] << ", "
+            << s.eigenvalues[1] << ", " << s.eigenvalues[2] << ")\n";
     }
 
-    std::cout << "Coincident vertex groups: "
-              << coincident.groups << '\n';
-    std::cout << "Coincident extra vertices: "
-              << coincident.extra_vertices << '\n';
     std::cout << "========================================================\n";
-}
-
-pmp::SurfaceMesh to_pmp_mesh(const iso::mc::Mesh& source)
-{
-    pmp::SurfaceMesh mesh;
-    std::vector<pmp::Vertex> vertices;
-    vertices.reserve(source.vertices.size());
-
-    for (const auto& p : source.vertices)
-    {
-        vertices.push_back(mesh.add_vertex(
-            pmp::Point(static_cast<float>(p[0]),
-                       static_cast<float>(p[1]),
-                       static_cast<float>(p[2]))));
-    }
-
-    for (const auto& triangle : source.triangles)
-    {
-        mesh.add_triangle(vertices[triangle[0]],
-                          vertices[triangle[1]],
-                          vertices[triangle[2]]);
-    }
-
-    return mesh;
 }
 
 std::vector<pmp::Color> make_local_colors(
@@ -410,8 +390,7 @@ std::vector<pmp::Color> make_local_colors(
     std::vector<pmp::Color> colors(
         mesh.vertices.size(),
         pmp::Color(0.6f, 0.6f, 0.6f));
-
-    const double radius_squared = radius * radius;
+    const double radius2 = radius * radius;
 
     for (std::size_t i = 0; i < mesh.vertices.size(); ++i)
     {
@@ -421,99 +400,55 @@ std::vector<pmp::Color> make_local_colors(
         const double dz = p[2] - center[2];
         const double d2 = dx * dx + dy * dy + dz * dz;
 
-        if (d2 <= radius_squared)
+        if (d2 <= radius2)
             colors[i] = pmp::Color(0.2f, 0.6f, 1.0f);
-
-        if (std::sqrt(d2) <= 1e-8)
+        if (d2 <= 1e-16)
             colors[i] = pmp::Color(1.0f, 0.85f, 0.0f);
     }
-
     return colors;
 }
 
-void print_scalar_statistics(
-    const std::string& label,
-    const LocalUnfolder::ScalarStatistics& scalar)
+bool has_no_gui_flag(int argc, char** argv)
 {
-    std::cout << "\n" << label << ":\n";
-    std::cout << "  Refinement factor : "
-              << scalar.refinement_factor << "x\n";
-    std::cout << "  Voxel spacing     : "
-              << scalar.spacing << '\n';
-    std::cout << "  Selected voxels   : "
-              << scalar.selected_voxels << '\n';
-    std::cout << "  Corner values     : "
-              << scalar.corner_value_samples << '\n';
-    std::cout << "  Scalar range      : ["
-              << scalar.min_value << ", "
-              << scalar.max_value << "]\n";
-    std::cout << "  Scalar mean       : "
-              << scalar.mean_value << '\n';
-
-    if (scalar.has_representative_voxel)
+    for (int i = 1; i < argc; ++i)
     {
-        std::cout << "  Representative voxel corners:\n    ";
-        for (std::size_t i = 0; i < 8; ++i)
-        {
-            if (i > 0)
-                std::cout << ", ";
-            std::cout << scalar.representative_values[i];
-        }
-        std::cout << '\n';
+        if (std::string(argv[i]) == "--no-gui")
+            return true;
     }
+    return false;
 }
+
+} // namespace
 
 int main(int argc, char** argv)
 {
     try
     {
-        const double c_val =
-            (argc > 1) ? std::stod(argv[1]) : 0.0;
-
-        const std::size_t resolution =
-            (argc > 2)
-                ? static_cast<std::size_t>(std::stoul(argv[2]))
-                : 129;
-
-        // Third argument is ONLY the half-extent of the global box.
-        // ./build/Isosurfaces 0.0 129 2
-        // means [-2,2]^3, not two local refinement levels.
-        const double extent =
-            (argc > 3) ? std::stod(argv[3]) : 2.0;
-
-        // Fourth/fifth arguments control the local experiment.
-        const double local_radius =
-            (argc > 4) ? std::stod(argv[4]) : 0.3;
-
-        const std::size_t local_levels =
-            (argc > 5)
-                ? static_cast<std::size_t>(std::stoul(argv[5]))
-                : 2;
+        const double c_val = argc > 1 ? std::stod(argv[1]) : 0.0;
+        const std::size_t resolution = argc > 2
+            ? static_cast<std::size_t>(std::stoul(argv[2]))
+            : 129;
+        const double extent = argc > 3 ? std::stod(argv[3]) : 2.0;
+        const double local_radius = argc > 4 ? std::stod(argv[4]) : 0.3;
+        const std::size_t local_levels = argc > 5
+            ? static_cast<std::size_t>(std::stoul(argv[5]))
+            : 2;
+        const bool no_gui = has_no_gui_flag(argc, argv);
 
         if (resolution < 2)
-        {
-            std::cerr << "ERROR: resolution must be at least 2.\n";
-            return 1;
-        }
-
-        if (extent <= 0.0)
-        {
-            std::cerr << "ERROR: extent must be positive.\n";
-            return 1;
-        }
-
-        if (local_radius <= 0.0)
-        {
-            std::cerr << "ERROR: local radius must be positive.\n";
-            return 1;
-        }
+            throw std::invalid_argument("resolution must be at least 2");
+        if (!(extent > 0.0))
+            throw std::invalid_argument("extent must be positive");
+        if (!(local_radius > 0.0))
+            throw std::invalid_argument("local radius must be positive");
 
         ParameterizedConeQuadric quadric(c_val);
         SingularityDetector detector(quadric, 1e-2, 1e-3);
 
         iso::mc::Bounds bounds{
             {-extent, -extent, -extent},
-            { extent,  extent,  extent}};
+            { extent,  extent, extent}
+        };
 
         iso::mc::Options mc_options;
         mc_options.nx = resolution;
@@ -524,101 +459,42 @@ int main(int argc, char** argv)
         std::cout
             << "========================================================\n"
             << "  MARCHING CUBES ISOSURFACE GENERATION\n"
-            << "========================================================\n\n";
-
-        std::cout << "Parameter c      : " << c_val << '\n';
-        std::cout << "Grid resolution  : " << resolution << "^3\n";
-        std::cout << "Sampling bounds  : [-" << extent << ", "
-                  << extent << "]^3\n";
-        std::cout << "Local radius     : " << local_radius << '\n';
-        std::cout << "Local levels     : " << local_levels << '\n';
+            << "========================================================\n\n"
+            << "Parameter c      : " << c_val << '\n'
+            << "Grid resolution  : " << resolution << "^3\n"
+            << "Sampling bounds  : [-" << extent << ", " << extent << "]^3\n"
+            << "Local radius     : " << local_radius << '\n'
+            << "Local levels     : " << local_levels << '\n'
+            << "GUI               : " << (no_gui ? "disabled" : "enabled") << "\n\n";
 
         const auto mc_start = std::chrono::steady_clock::now();
-        const iso::mc::Mesh extracted =
-            iso::mc::extract(
-                [&](double x, double y, double z)
-                {
-                    return quadric.eval(x, y, z);
-                },
-                bounds,
-                mc_options);
+        const iso::mc::Mesh extracted = iso::mc::extract(
+            [&](double x, double y, double z) { return quadric.eval(x, y, z); },
+            bounds,
+            mc_options);
         const auto mc_end = std::chrono::steady_clock::now();
+        const double mc_ms = std::chrono::duration<double, std::milli>(
+            mc_end - mc_start).count();
 
-        const double mc_ms =
-            std::chrono::duration<double, std::milli>(
-                mc_end - mc_start).count();
-
-        std::cout << "\nSampling implicit surface on "
-                  << resolution << "^3 grid...\n";
-        std::cout << "Marching Cubes produced "
-                  << extracted.vertices.size()
-                  << " vertices and "
-                  << extracted.triangles.size()
-                  << " triangles.\n";
-        std::cout << "Marching Cubes time : " << mc_ms << " ms\n";
+        std::cout
+            << "Marching Cubes produced " << extracted.vertices.size()
+            << " vertices and " << extracted.triangles.size() << " triangles.\n"
+            << "Marching Cubes time : " << mc_ms << " ms\n";
 
         pmp::SurfaceMesh mesh = to_pmp_mesh(extracted);
-
         std::vector<std::size_t> component_sizes;
         const std::vector<int> component =
             compute_connected_components(mesh, component_sizes);
 
-        // Apex diagnostics for the c = 0 cone experiment.
-        std::vector<pmp::Vertex> apex_vertices;
-        for (auto v : mesh.vertices())
-        {
-            const pmp::Point p = mesh.position(v);
-            if (p[0] == 0.0f && p[1] == 0.0f && p[2] == 0.0f)
-                apex_vertices.push_back(v);
-        }
-
-        std::cout << "\nApex vertices at (0,0,0): "
-                  << apex_vertices.size() << '\n';
-
-        for (auto v : apex_vertices)
-        {
-            std::cout << "  Vertex " << v.idx()
-                      << " -> component " << component[v.idx()]
-                      << ", valence " << mesh.valence(v) << '\n';
-
-            std::cout << "    neighbors:";
-            for (auto vv : mesh.vertices(v))
-            {
-                const pmp::Point q = mesh.position(vv);
-                std::cout << ' ' << vv.idx()
-                          << "(" << q[0] << ','
-                          << q[1] << ','
-                          << q[2] << ')';
-            }
-            std::cout << '\n';
-        }
-
-        if (apex_vertices.size() > 1)
-        {
-            bool separate_components = false;
-            for (std::size_t i = 0; i < apex_vertices.size(); ++i)
-            {
-                for (std::size_t j = i + 1; j < apex_vertices.size(); ++j)
-                {
-                    if (component[apex_vertices[i].idx()] !=
-                        component[apex_vertices[j].idx()])
-                    {
-                        separate_components = true;
-                    }
-                }
-            }
-
-            std::cout
-                << "\nApex vertices belong to different components: "
-                << (separate_components ? "YES" : "NO") << '\n';
-        }
-
-        std::vector<pmp::Color> colors(mesh.n_vertices());
+        std::vector<pmp::Color> colors(
+            mesh.n_vertices(),
+            pmp::Color(0.6f, 0.6f, 0.6f));
         std::vector<SingularityClassificationResult> results(mesh.n_vertices());
 
         std::size_t regular_count = 0;
         std::size_t nondegenerate_count = 0;
         std::size_t degenerate_count = 0;
+        std::vector<pmp::Vertex> singular_vertices;
 
         std::cout
             << "\n========================================================\n"
@@ -628,305 +504,183 @@ int main(int argc, char** argv)
         for (auto v : mesh.vertices())
         {
             const pmp::Point p = mesh.position(v);
-            const SingularityClassificationResult result =
-                detector.classifyPoint(p);
-
+            const auto result = detector.classifyPoint(p);
             results[v.idx()] = result;
 
             if (result.type == SingularityType::Regular)
             {
-                colors[v.idx()] = pmp::Color(0.6f, 0.6f, 0.6f);
                 ++regular_count;
                 continue;
             }
 
-            std::cout
-                << "\n--- Singular candidate ---\n"
-                << std::setprecision(12);
-            std::cout << "Vertex index: " << v.idx() << '\n';
-            std::cout << "Position: ("
-                      << result.position[0] << ", "
-                      << result.position[1] << ", "
-                      << result.position[2] << ")\n";
-            std::cout << "f(p): " << result.function_value << '\n';
-            std::cout << "Gradient: ("
-                      << result.gradient[0] << ", "
-                      << result.gradient[1] << ", "
-                      << result.gradient[2] << ")\n";
-            std::cout << "|Gradient|: " << result.gradient_norm << '\n';
-            std::cout << "Hessian determinant: "
-                      << result.hessian_determinant << '\n';
-            std::cout << "Hessian eigenvalues: ("
-                      << result.eigenvalues[0] << ", "
-                      << result.eigenvalues[1] << ", "
-                      << result.eigenvalues[2] << ")\n";
-            std::cout << "Classification: "
-                      << singularity_type_name(result.type) << '\n';
+            singular_vertices.push_back(v);
+            std::cout << std::setprecision(12)
+                      << "\nCandidate vertex " << v.idx()
+                      << " position=(" << result.position[0] << ", "
+                      << result.position[1] << ", " << result.position[2] << ")\n"
+                      << "  f(p)       = " << result.function_value << '\n'
+                      << "  |grad f|   = " << result.gradient_norm << '\n'
+                      << "  det(H)     = " << result.hessian_determinant << '\n'
+                      << "  eigenvalues= (" << result.eigenvalues[0] << ", "
+                      << result.eigenvalues[1] << ", " << result.eigenvalues[2] << ")\n"
+                      << "  class      = " << singularity_type_name(result.type) << '\n';
 
             if (result.type == SingularityType::NonDegenerateSingular)
             {
-                colors[v.idx()] = pmp::Color(1.0f, 0.85f, 0.0f);
                 ++nondegenerate_count;
+                colors[v.idx()] = pmp::Color(1.0f, 0.85f, 0.0f);
             }
             else
             {
-                colors[v.idx()] = pmp::Color(1.0f, 0.0f, 0.0f);
                 ++degenerate_count;
+                colors[v.idx()] = pmp::Color(1.0f, 0.0f, 0.0f);
             }
         }
 
-        const ClassificationCounts baseline_classification{
-            regular_count,
-            nondegenerate_count,
-            degenerate_count};
+        const auto geometric_singularities = group_geometric_singularities(
+            mesh, results);
 
-        // The topology report now contains the singular-vertex count.
         print_topology_report(
             extracted,
             mesh,
             component_sizes,
-            baseline_classification);
+            geometric_singularities,
+            regular_count,
+            nondegenerate_count,
+            degenerate_count);
 
-        const std::vector<GeometricSingularity> geometric_singularities =
-            group_geometric_singularities(mesh, results);
-
-        std::cout
-            << "\n--- Geometric Singularity Groups ---\n";
-        std::cout
-            << "Geometric singularities: "
-            << geometric_singularities.size() << '\n';
-
-        for (std::size_t i = 0; i < geometric_singularities.size(); ++i)
+        // Preserve the useful c=0 apex diagnostic while explicitly keeping the
+        // coincident apex copies as separate topology vertices/components.
+        if (!singular_vertices.empty())
         {
-            const auto& singularity = geometric_singularities[i];
-
-            std::cout << "\nSingularity #" << i << '\n';
-            std::cout << "  Center: ("
-                      << singularity.center[0] << ", "
-                      << singularity.center[1] << ", "
-                      << singularity.center[2] << ")\n";
-            std::cout << "  Type: "
-                      << singularity_type_name(singularity.type) << '\n';
-
-            std::cout << "  Mesh representatives: {";
-            for (std::size_t j = 0;
-                 j < singularity.representative_vertices.size();
-                 ++j)
+            std::cout << "\nSingular mesh representatives:\n";
+            for (auto v : singular_vertices)
             {
-                if (j > 0)
-                    std::cout << ", ";
-                std::cout << singularity.representative_vertices[j];
+                std::cout << "  Vertex " << v.idx()
+                          << " -> component " << component[v.idx()]
+                          << ", valence " << mesh.valence(v) << '\n';
             }
-            std::cout << "}\n";
-
-            std::cout << "  Hessian determinant: "
-                      << singularity.hessian_determinant << '\n';
-            std::cout << "  Hessian eigenvalues: ("
-                      << singularity.eigenvalues[0] << ", "
-                      << singularity.eigenvalues[1] << ", "
-                      << singularity.eigenvalues[2] << ")\n";
-            std::cout << "  Coincident mesh representatives: "
-                      << (singularity.representative_vertices.size() > 1
-                              ? "YES"
-                              : "NO")
-                      << '\n';
         }
 
         if (!geometric_singularities.empty())
         {
             const auto& singularity = geometric_singularities.front();
-            const iso::mc::Point center{
+            iso::mc::Point center{
                 static_cast<double>(singularity.center[0]),
                 static_cast<double>(singularity.center[1]),
                 static_cast<double>(singularity.center[2])};
 
-            std::size_t vertices_in_radius = 0;
-            const double radius_squared = local_radius * local_radius;
-
-            for (const auto& p : extracted.vertices)
-            {
-                const double dx = p[0] - center[0];
-                const double dy = p[1] - center[1];
-                const double dz = p[2] - center[2];
-                const double d2 = dx * dx + dy * dy + dz * dz;
-                if (d2 <= radius_squared)
-                    ++vertices_in_radius;
-            }
-
-            std::cout << "\n--- Localization Results ---\n";
-            std::cout << "Singularity Center Estimated at: ("
-                      << center[0] << ", "
-                      << center[1] << ", "
-                      << center[2] << ")\n";
-            std::cout << "Local Unfolding Region (Radius "
-                      << local_radius << ") contains "
-                      << vertices_in_radius << " vertices.\n";
-
-            LocalUnfolder local_unfolder;
             LocalUnfolder::Options local_options;
             local_options.radius = local_radius;
             local_options.levels = local_levels;
-            local_options.sampling_bounds = bounds;
-            local_options.base_resolution = resolution;
-            local_options.isovalue = mc_options.isovalue;
+            local_options.region_mode = LocalUnfolder::RegionMode::TopologicalBfs;
 
+            LocalUnfolder local_unfolder;
             const auto local_start = std::chrono::steady_clock::now();
-            const LocalUnfolder::Result local_result =
-                local_unfolder.refine(
-                    extracted,
-                    quadric,
-                    center,
-                    local_options);
+            const auto local_result = local_unfolder.refine(
+                extracted,
+                quadric,
+                center,
+                local_options);
             const auto local_end = std::chrono::steady_clock::now();
-
-            const double local_ms =
-                std::chrono::duration<double, std::milli>(
-                    local_end - local_start).count();
+            const double local_ms = std::chrono::duration<double, std::milli>(
+                local_end - local_start).count();
 
             std::cout
                 << "\n========================================================\n"
                 << "  LOCAL UNFOLDING / REFINEMENT\n"
-                << "========================================================\n";
-            std::cout << "Input vertices      : "
-                      << local_result.input_vertices << '\n';
-            std::cout << "Input triangles     : "
-                      << local_result.input_triangles << '\n';
-            std::cout << "Region vertices     : "
-                      << local_result.vertices_in_region << '\n';
-            std::cout << "Region faces        : "
-                      << local_result.faces_in_region << '\n';
-            std::cout << "Requested levels    : "
-                      << local_levels << '\n';
-            std::cout << "Executed levels     : "
-                      << local_result.levels.size() << '\n';
-
-            print_scalar_statistics(
-                "Original selected voxel scalar values",
-                local_result.initial_scalar);
+                << "========================================================\n"
+                << "Selection mode       : " << region_mode_name(local_options.region_mode) << '\n'
+                << "Input vertices       : " << local_result.input_vertices << '\n'
+                << "Input triangles      : " << local_result.input_triangles << '\n'
+                << "Sphere faces         : " << local_result.sphere_faces_in_region << '\n'
+                << "Topological-BFS faces: " << local_result.topological_faces_in_region << '\n'
+                << "Selected faces       : " << local_result.faces_in_region << '\n'
+                << "Region vertices      : " << local_result.vertices_in_region << '\n'
+                << "Refinement interface edges      : " << local_result.interface_edges << '\n'
+                << "Refinement interface vertices   : " << local_result.interface_vertices << '\n'
+                << "\n";
 
             for (const auto& level : local_result.levels)
             {
-                std::cout << "\nLevel " << level.level << ":\n";
-                std::cout << "  Selected faces     : "
-                          << level.selected_faces << '\n';
-                std::cout << "  New vertices       : "
-                          << level.new_vertices << '\n';
-                std::cout << "  New triangles      : "
-                          << level.new_triangles << '\n';
-                std::cout << "  Output vertices    : "
-                          << level.output_vertices << '\n';
-                std::cout << "  Output triangles   : "
-                          << level.output_triangles << '\n';
-                std::cout << "  Projection failures: "
-                          << level.projection_failures << '\n';
-                std::cout << "  Boundary edges     : "
-                          << level.boundary_edges << '\n';
-                std::cout << "  Boundary vertices  : "
-                          << level.boundary_vertices << '\n';
-
-                print_scalar_statistics(
-                    "  Local scalar values",
-                    level.scalar);
+                std::cout
+                    << "Level " << level.level << ":\n"
+                    << "  Selected faces      : " << level.selected_faces << '\n'
+                    << "  Sphere faces        : " << level.selected_faces_sphere << '\n'
+                    << "  Topological-BFS     : " << level.selected_faces_topological << '\n'
+                    << "  Selection differs   : " << (level.selection_changed ? "YES" : "NO") << '\n'
+                    << "  Split edges         : " << level.split_edges << '\n'
+                    << "  Interface edges     : " << level.interface_edges << '\n'
+                    << "  Interface vertices  : " << level.interface_vertices << '\n'
+                    << "  Global surface boundary edges    : " << level.global_boundary_edges << '\n'
+                    << "  Global surface boundary vertices : " << level.global_boundary_vertices << '\n'
+                    << "  New vertices        : " << level.new_vertices << '\n'
+                    << "  New triangles       : " << level.new_triangles << '\n'
+                    << "  Projection failures : " << level.projection_failures << '\n';
             }
 
-            std::cout << "\nLocal refinement time: "
-                      << local_ms << " ms\n";
-            std::cout << "Final local vertices: "
-                      << local_result.output_vertices << '\n';
-            std::cout << "Final local triangles: "
-                      << local_result.output_triangles << '\n';
-            std::cout << "Final interface boundary edges   : "
-                      << local_result.boundary_edges << '\n';
-            std::cout << "Final interface boundary vertices: "
-                      << local_result.boundary_vertices << '\n';
             std::cout
-                << "Stitching: interface edges use one shared midpoint vertex; "
-                   "the unselected side is split on those same vertices.\n";
+                << "\nLocal refinement time: " << local_ms << " ms\n"
+                << "Final local vertices : " << local_result.output_vertices << '\n'
+                << "Final local triangles: " << local_result.output_triangles << '\n';
 
             pmp::SurfaceMesh local_mesh = to_pmp_mesh(local_result.mesh);
-            std::vector<std::size_t> local_components;
-            compute_connected_components(local_mesh, local_components);
+            std::vector<std::size_t> local_component_sizes;
+            compute_connected_components(local_mesh, local_component_sizes);
+            const EdgeStatistics local_edges = compute_edge_statistics(local_result.mesh);
+            std::cout
+                << "Final global surface boundary edges    : " << local_edges.boundary_edges << '\n'
+                << "Final global surface boundary vertices : " << local_edges.boundary_vertices << '\n'
+                << "Final refinement interface edges       : " << local_result.interface_edges << '\n'
+                << "Final refinement interface vertices    : " << local_result.interface_vertices << '\n';
 
-            const ClassificationCounts local_classification =
-                classify_mesh_counts(local_mesh, detector);
-
-            std::cout << "\nLocal refined topology:\n";
-            print_topology_report(
-                local_result.mesh,
-                local_mesh,
-                local_components,
-                local_classification);
-
+            std::filesystem::create_directories("outputs");
             const std::string c_string = format_parameter(c_val);
-            const std::filesystem::path output_dir = "outputs";
-            std::filesystem::create_directories(output_dir);
-
             const std::filesystem::path local_ply =
-                output_dir /
-                ("local_unfolded_c_" + c_string +
-                 "_l" + std::to_string(local_levels) + ".ply");
-
+                std::filesystem::path("outputs") /
+                ("local_unfolded_c_" + c_string + "_l" +
+                 std::to_string(local_levels) + ".ply");
             const std::filesystem::path local_obj =
-                output_dir /
-                ("local_unfolded_c_" + c_string +
-                 "_l" + std::to_string(local_levels) + ".obj");
+                std::filesystem::path("outputs") /
+                ("local_unfolded_c_" + c_string + "_l" +
+                 std::to_string(local_levels) + ".obj");
 
-            const std::vector<pmp::Color> local_colors =
-                make_local_colors(
-                    local_result.mesh,
-                    center,
-                    local_radius);
-
-            write_colored_ply(
-                local_mesh,
-                local_colors,
-                local_ply.string());
-
+            const auto local_colors = make_local_colors(
+                local_result.mesh, center, local_radius);
+            write_colored_ply(local_mesh, local_colors, local_ply.string());
             pmp::write(local_mesh, local_obj.string());
 
-            std::cout << "\nSaved local PLY:\n  "
-                      << local_ply.string() << '\n';
-            std::cout << "Saved local OBJ:\n  "
-                      << local_obj.string() << '\n';
+            std::cout
+                << "Saved local PLY: " << local_ply.string() << '\n'
+                << "Saved local OBJ: " << local_obj.string() << '\n';
 
-            iso::MyViewer window(
-                "Local Unfolding / Refinement",
-                1024,
-                768);
+            if (no_gui)
+                return 0;
+
+            iso::MyViewer window("Local Unfolding / Refinement", 1024, 768);
             window.load_mesh(local_obj.string().c_str());
             return window.run();
         }
 
-        std::cout << "\nClassification Results:\n";
-        std::cout << "  Regular (Gray): "
-                  << regular_count << '\n';
-        std::cout << "  Morse/NonDegenerate (Yellow): "
-                  << nondegenerate_count << '\n';
-        std::cout << "  Degenerate (Red): "
-                  << degenerate_count << '\n';
-
-        const std::filesystem::path output_dir = "outputs";
-        std::filesystem::create_directories(output_dir);
-
+        std::filesystem::create_directories("outputs");
         const std::string c_string = format_parameter(c_val);
         const std::filesystem::path out_ply =
-            output_dir / ("colored_result_c_" + c_string + ".ply");
+            std::filesystem::path("outputs") /
+            ("colored_result_c_" + c_string + ".ply");
         const std::filesystem::path out_obj =
-            output_dir / ("viewer_mesh_c_" + c_string + ".obj");
+            std::filesystem::path("outputs") /
+            ("viewer_mesh_c_" + c_string + ".obj");
 
         write_colored_ply(mesh, colors, out_ply.string());
         pmp::write(mesh, out_obj.string());
+        std::cout
+            << "\nSaved colored PLY: " << out_ply.string() << '\n'
+            << "Saved viewer OBJ: " << out_obj.string() << '\n';
 
-        std::cout << "\nSaved colored PLY:\n  "
-                  << out_ply.string() << '\n';
-        std::cout << "Saved viewer OBJ:\n  "
-                  << out_obj.string() << '\n';
-        std::cout << "\nOpening Viewer...\n";
+        if (no_gui)
+            return 0;
 
-        iso::MyViewer window(
-            "Marching Cubes / Singularity Viewer",
-            1024,
-            768);
+        iso::MyViewer window("Marching Cubes / Singularity Viewer", 1024, 768);
         window.load_mesh(out_obj.string().c_str());
         return window.run();
     }
