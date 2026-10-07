@@ -1,12 +1,23 @@
 # Isosurfaces
 
-Research code for studying topology changes and local mesh refinement of an implicit surface
+Research code for studying topology changes and local refinement of an implicit surface.
+
+The current executable uses an in-project classic 256-case Marching Cubes implementation to extract
 
 \[
-f(x,y,z) = x^2 + y^2 - z^2 - c.
+f(x,y,z)=x^2+y^2-z^2-c.
 \]
 
-The current executable uses an in-project **classic 256-case Marching Cubes** implementation. It samples the implicit function on a regular grid, extracts the isosurface, reports mesh topology, classifies critical mesh vertices from the analytic/numerical gradient and Hessian, groups coincident singular representatives geometrically, and can apply conforming local triangle refinement around a detected singularity.
+The pipeline is:
+
+1. global voxel sampling and classic 256-case Marching Cubes,
+2. mesh topology diagnostics,
+3. critical-point/singularity classification from the gradient and Hessian,
+4. geometric grouping of coincident singular mesh representatives,
+5. conforming local triangle subdivision with projection back to the implicit surface, and
+6. an independent local voxel Marching Cubes extraction around the detected singularity.
+
+The local voxel extractor is the next-stage voxel-based refinement path. It deliberately runs as a separate local patch at this stage. The existing `LocalUnfolder` output remains the conforming triangle-subdivision baseline used for visualization and transition-stitching measurements. Direct replacement of that baseline by a locally re-extracted voxel patch is the subsequent stitching step.
 
 For the parameter family above:
 
@@ -14,20 +25,22 @@ For the parameter family above:
 - `c = 0`: double cone with a non-degenerate Morse saddle at the origin
 - `c > 0`: one-sheet hyperboloid
 
-The finite sampling box may clip the surface, so boundary edges are expected in those experiments.
+Because the global implicit surface is clipped to a finite Marching Cubes box, its outer boundary edges are expected. These are different from the local refinement interface between selected and untouched surface regions.
 
 ## Build
-
-The project uses CMake and downloads the `pmp-library` dependency automatically.
 
 ```bash
 cmake -S . -B build
 cmake --build build --config Release --parallel
 ```
 
-## Run
+Tests are enabled through CTest:
 
-The command line uses positional arguments:
+```bash
+ctest --test-dir build --output-on-failure
+```
+
+## Run
 
 ```text
 Isosurfaces [c] [resolution] [extent] [local-radius] [local-levels] [--no-gui]
@@ -51,54 +64,18 @@ Examples:
 ./build/Isosurfaces 0.25 129 2 --no-gui
 ```
 
-A resolution such as `129` is useful for the cone experiment because the grid then contains the origin exactly when sampling `[-2,2]^3`.
+A resolution such as `129` is useful for the cone experiment because the grid then contains the origin exactly on `[-2,2]^3`.
 
-Outputs are written under `outputs/` as PLY and OBJ files.
+## Local refinement measurements
 
-## What is measured
+The program distinguishes:
 
-The console report includes vertex/edge/triangle counts, boundary edges and vertices, non-manifold edges and vertices, connected components, coincident vertex groups, and singularity-classification counts.
+- **global surface boundary**: edges where the extracted surface is clipped by the finite sampling box;
+- **refinement interface**: the interface between refined and untouched portions of the surface;
+- **local voxel MC patch boundary**: the artificial boundary of the independently extracted local patch.
 
-At `c=0`, the geometric singularity grouping can contain multiple mesh representatives at the same physical point. They are intentionally **not merged in the mesh**: they may belong to different connected components of the extracted surface. The report groups them geometrically while preserving their topology.
+The local voxel Marching Cubes stage reports its aligned local box, refinement factor, coarse/refined spacing, local grid resolution, patch topology, and extraction time for every level.
 
-## Local refinement
+The conforming local subdivision stage supports two region definitions: Euclidean sphere selection and a multi-source topological BFS seeded from all mesh representatives of the geometric singularity. Both counts are reported; the default mode is topological BFS. The stage reports refinement-interface counts, new vertices/triangles, projection failures, scalar-value diagnostics, and final mesh topology.
 
-The local stage currently performs **conforming triangle subdivision plus projection back to the implicit surface**. Region selection supports both:
-
-- Euclidean sphere selection by face centroid; and
-- topological/geodesic selection by a weighted BFS/Dijkstra traversal over the triangle adjacency graph.
-
-The default is the topological mode. Both selection counts are reported so the geometric and topological definitions can be compared directly.
-
-For every refinement level the program reports selected faces, split/interface edges and vertices, surface boundary edges and vertices, newly created triangles/vertices, and projection failures.
-
-This stage is intentionally separate from the global voxel Marching Cubes extraction. A voxel-local Marching Cubes patch with exact interface stitching is a future refinement of the experimental pipeline rather than something silently claimed by the current implementation.
-
-## Tests
-
-CTest is enabled and the project builds a current-pipeline test executable:
-
-```bash
-ctest --test-dir build --output-on-failure
-```
-
-The tests cover cone singularity classification, hyperboloid regularity and Hessian eigenvalues, numerical derivative fallbacks, Euler characteristic of a closed Marching Cubes sphere, and local-region/interface/boundary statistics.
-
-## Source layout
-
-```text
-include/
-  ImplicitSurface.hpp       implicit surface family and exact cone derivatives
-  MarchingCubes.hpp         classic 256-case Marching Cubes
-  SingularityDetector.hpp   regular / non-degenerate / degenerate classification
-  GradientHessian.hpp       safe numerical derivative helper
-  LocalUnfolder.hpp         local region selection and conforming refinement
-src/
-  main.cpp                  current research executable
-  app/MyViewer.h            PMP viewer wrapper
-
-tests/
-  tests.cpp                 current-pipeline tests
-```
-
-Legacy MeshLab/remeshing entry points are not part of the current CMake target. The active experiment is driven by `src/main.cpp`.
+The two local methods are intentionally kept separate so that the thesis can compare voxel sampling against the conforming triangle baseline before implementing direct voxel-patch replacement and transition stitching.
