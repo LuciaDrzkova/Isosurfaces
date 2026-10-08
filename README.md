@@ -2,45 +2,44 @@
 
 Research code for studying topology changes and local refinement of an implicit surface.
 
-The current executable uses an in-project classic 256-case Marching Cubes implementation to extract
+The project now has three related local-refinement paths:
+
+1. global voxel sampling + classic 256-case Marching Cubes,
+2. `LocalUnfolder` conforming triangle subdivision as the baseline,
+3. independent local voxel Marching Cubes followed by geometric seam stitching back into the global mesh.
+
+The original parameter family is
 
 \[
 f(x,y,z)=x^2+y^2-z^2-c.
 \]
 
-The pipeline is:
+For this family:
 
-1. global voxel sampling and classic 256-case Marching Cubes,
-2. mesh topology diagnostics,
-3. critical-point/singularity classification from the gradient and Hessian,
-4. geometric grouping of coincident singular mesh representatives,
-5. conforming local triangle subdivision with projection back to the implicit surface, and
-6. an independent local voxel Marching Cubes extraction around the detected singularity.
+- `c < 0`: two-sheet hyperboloid,
+- `c = 0`: double cone with a non-degenerate Morse saddle at the origin,
+- `c > 0`: one-sheet hyperboloid.
 
-The local voxel extractor is the next-stage voxel-based refinement path. It deliberately runs as a separate local patch at this stage. The existing `LocalUnfolder` output remains the conforming triangle-subdivision baseline used for visualization and transition-stitching measurements. Direct replacement of that baseline by a locally re-extracted voxel patch is the subsequent stitching step.
+The finite Marching Cubes sampling box intentionally creates an outer surface boundary. The voxel-patch stitcher removes a local spherical region, inserts the independently extracted finer patch, and bridges the two local boundary loops/loops with a conforming triangle strip. The original `LocalUnfolder` result is preserved as the comparison baseline.
 
-For the parameter family above:
+A second non-quadric family is available:
 
-- `c < 0`: two-sheet hyperboloid
-- `c = 0`: double cone with a non-degenerate Morse saddle at the origin
-- `c > 0`: one-sheet hyperboloid
+\[
+f(x,y,z)=x^2+y^2-z^2+\alpha(x^4+y^4+z^4)-c,
+\qquad \alpha=0.05.
+\]
 
-Because the global implicit surface is clipped to a finite Marching Cubes box, its outer boundary edges are expected. These are different from the local refinement interface between selected and untouched surface regions.
+This exercises the generic numerical gradient/Hessian paths in `SingularityDetector` and `LocalUnfolder` while retaining a non-degenerate saddle at the origin for `c=0`.
 
 ## Build
 
 ```bash
 cmake -S . -B build
 cmake --build build --config Release --parallel
-```
-
-Tests are enabled through CTest:
-
-```bash
 ctest --test-dir build --output-on-failure
 ```
 
-## Run
+## Existing viewer
 
 ```text
 Isosurfaces [c] [resolution] [extent] [local-radius] [local-levels] [--no-gui]
@@ -56,26 +55,95 @@ local-radius  = 0.3
 local-levels  = 2
 ```
 
-Examples:
+## Stitched local voxel patch viewer
+
+The new `IsosurfacesStitched` executable runs the independent local voxel MC extraction and stitches the resulting patch back into the global MC mesh.
 
 ```bash
-./build/Isosurfaces 0 129 2 0.3 2 --no-gui
-./build/Isosurfaces -0.25 129 2 --no-gui
-./build/Isosurfaces 0.25 129 2 --no-gui
+./build/IsosurfacesStitched 0 65 2 0.3 2
 ```
 
-A resolution such as `129` is useful for the cone experiment because the grid then contains the origin exactly on `[-2,2]^3`.
+Non-quadric family:
 
-## Local refinement measurements
+```bash
+./build/IsosurfacesStitched 0 65 2 0.3 2 --surface quartic
+```
 
-The program distinguishes:
+Disable the GUI and use topology output only:
 
-- **global surface boundary**: edges where the extracted surface is clipped by the finite sampling box;
-- **refinement interface**: the interface between refined and untouched portions of the surface;
-- **local voxel MC patch boundary**: the artificial boundary of the independently extracted local patch.
+```bash
+./build/IsosurfacesStitched 0 65 2 0.3 2 --no-gui
+```
 
-The local voxel Marching Cubes stage reports its aligned local box, refinement factor, coarse/refined spacing, local grid resolution, patch topology, and extraction time for every level.
+The resulting OBJ is written to `outputs/stitched_voxel_*.obj`.
 
-The conforming local subdivision stage supports two region definitions: Euclidean sphere selection and a multi-source topological BFS seeded from all mesh representatives of the geometric singularity. Both counts are reported; the default mode is topological BFS. The stage reports refinement-interface counts, new vertices/triangles, projection failures, scalar-value diagnostics, and final mesh topology.
+## Parameter sweep
 
-The two local methods are intentionally kept separate so that the thesis can compare voxel sampling against the conforming triangle baseline before implementing direct voxel-patch replacement and transition stitching.
+`IsosurfacesSweep` reuses one global MC extraction per `(surface,c,resolution)` and records one CSV row for every `(radius,requested-levels,level)` combination. Each row contains the unified global topology report, the sphere-vs-topological `selection_changed` flag, `LocalUnfolder::ScalarStatistics`, local voxel patch statistics, and the stitched topology/seam statistics.
+
+Default research sweep:
+
+```bash
+./build/IsosurfacesSweep
+```
+
+The output is:
+
+```text
+outputs/parameter_sweep.csv
+```
+
+A smaller smoke sweep:
+
+```bash
+./build/IsosurfacesSweep --quick
+```
+
+Fine sweep around the topology transition:
+
+```bash
+./build/IsosurfacesSweep \
+  --surface cone \
+  --c-min -0.30 \
+  --c-max 0.30 \
+  --c-step 0.01 \
+  --resolutions 65,129 \
+  --radii 0.20,0.30 \
+  --levels 1,2 \
+  --output outputs/parameter_sweep_cone.csv
+```
+
+Run the same experiment for the non-quadric family:
+
+```bash
+./build/IsosurfacesSweep \
+  --surface quartic \
+  --c-min -0.30 \
+  --c-max 0.30 \
+  --c-step 0.01 \
+  --resolutions 65,129 \
+  --radii 0.20,0.30 \
+  --levels 1,2 \
+  --output outputs/parameter_sweep_quartic.csv
+```
+
+Run the regular closed-surface control:
+
+```bash
+./build/IsosurfacesSweep --surface sphere --c-min 0 --c-max 0 --c-step 1
+```
+
+For the cone experiment, a resolution such as `129` places the origin exactly on the sampling grid for `[-2,2]^3`.
+
+## Local-refinement measurements
+
+The research data distinguishes:
+
+- global surface boundary: clipping against the finite MC sampling box,
+- conforming refinement interface: the `LocalUnfolder` refined/untouched interface,
+- local voxel patch boundary: the artificial boundary of an independently extracted local patch,
+- stitched seam: the bridge between the global outside mesh and the local voxel replacement.
+
+`selection_changed` is computed by comparing the Euclidean sphere face selection against the multi-source topological BFS selection used by `LocalUnfolder`.
+
+`ScalarStatistics` report refinement factor, spacing, selected voxels, scalar corner samples, scalar range, and scalar mean for each refinement level.

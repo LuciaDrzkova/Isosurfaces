@@ -14,7 +14,6 @@ include(FetchContent)
 include(CTest)
 
 enable_testing()
-
 set(PMP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(PMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(PMP_BUILD_DOCS OFF CACHE BOOL "" FORCE)
@@ -28,7 +27,6 @@ FetchContent_Declare(
   GIT_TAG 3.0.0
 )
 FetchContent_MakeAvailable(pmp-library)
-
 if(TARGET imgui)
   file(GLOB _glfw_dirs "${pmp-library_SOURCE_DIR}/external/glfw-*")
   list(GET _glfw_dirs 0 _glfw_dir)
@@ -47,6 +45,22 @@ find_package(Threads REQUIRED)
 add_executable(Isosurfaces src/main.cpp)
 target_include_directories(Isosurfaces PRIVATE src include)
 target_link_libraries(Isosurfaces PRIVATE iso_research pmp_vis Threads::Threads)
+
+# Research-data executable:
+# - compares the conforming LocalUnfolder baseline with
+#   independently extracted local voxel MC patches,
+# - stitches the voxel patch back into the global MC mesh,
+# - sweeps c/resolution/radius/levels and records topology + scalar statistics,
+# - supports the original cone, a non-quadric quartic saddle, and a sphere.
+add_executable(IsosurfacesSweep src/research_sweep.cpp)
+target_include_directories(IsosurfacesSweep PRIVATE include src)
+target_link_libraries(IsosurfacesSweep PRIVATE iso_research pmp Threads::Threads)
+
+# Single-configuration research viewer for the new voxel-patch -> global
+# stitching path. The existing Isosurfaces executable remains the baseline GUI.
+add_executable(IsosurfacesStitched src/stitched_viewer.cpp)
+target_include_directories(IsosurfacesStitched PRIVATE include src)
+target_link_libraries(IsosurfacesStitched PRIVATE iso_research pmp_vis Threads::Threads)
 
 add_executable(IsosurfacesTests tests/tests.cpp)
 target_include_directories(IsosurfacesTests PRIVATE include src)
