@@ -54,6 +54,10 @@ public:
         std::size_t selected_cells = 0;
         std::size_t active_cells = 0;
         double extraction_time_ms = 0.0;
+
+        // Kept for source compatibility with earlier experiments. This
+        // extractor deliberately does not weld coincident vertices; value is 0.
+        std::size_t welded_vertices = 0;
     };
 
 private:
@@ -140,9 +144,11 @@ public:
         if (!(options.radius > 0.0))
             throw std::invalid_argument(
                 "LocalMarchingCubes radius must be positive");
+
         if (options.base_resolution < 2)
             throw std::invalid_argument(
                 "LocalMarchingCubes requires base_resolution >= 2");
+
         if (!(options.sampling_bounds.min[0] < options.sampling_bounds.max[0] &&
               options.sampling_bounds.min[1] < options.sampling_bounds.max[1] &&
               options.sampling_bounds.min[2] < options.sampling_bounds.max[2]))
@@ -150,6 +156,7 @@ public:
             throw std::invalid_argument(
                 "LocalMarchingCubes received invalid sampling bounds");
         }
+
         if (options.level >= sizeof(std::size_t) * 8 - 2)
             throw std::invalid_argument(
                 "LocalMarchingCubes refinement level is too large");
@@ -263,6 +270,13 @@ public:
 
         result.extraction_time_ms =
             std::chrono::duration<double, std::milli>(end - start).count();
+
+        // Important: do not weld equal-position vertices here. At the cone
+        // apex and other grid-aligned zeroes, that merges otherwise distinct
+        // Marching-Cubes fans and drops degenerate triangles. The resulting
+        // pinched/non-manifold topology prevents the seam loops from matching.
+        // Mesh export should split disconnected fans if the viewer's mesh
+        // representation cannot encode the singular vertex directly.
         result.active_cells = result.mesh.triangles.size();
 
         boundary_statistics(

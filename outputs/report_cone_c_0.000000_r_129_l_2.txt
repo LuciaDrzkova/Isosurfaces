@@ -10,7 +10,7 @@ Local level: 2
 
 Global MC
 ---------
-Extraction time ms: 27.963415999999999
+Extraction time ms: 26.826374999999999
 Vertices: 58466
 Triangles: 115912
 Edges: 174376
@@ -29,27 +29,27 @@ Function value: 0
 Local voxel MC
 --------------
 Resolution: 73x73x73
-Vertices: 18466
-Triangles: 36360
+Vertices: 17769
+Triangles: 34968
 Boundary edges: 568
 Boundary vertices: 568
 Non-manifold edges: 0
-Extraction time ms: 5.006208
-Topology edges: 54824
-Topology components: 2
+Extraction time ms: 2.5099589999999998
+Topology edges: 52736
+Topology components: 1
 
 Stitching
 ---------
-Success: yes
+Success: no
 Global triangles removed: 808
-Local triangles inserted: 14208
-Seam loops: 2
-Seam vertices: 836
-Seam triangles: 836
-Max seam vertex distance: 0.078199344791541864
-Final vertices: 65749
-Final triangles: 130478
-Final edges: 196225
+Local triangles inserted: 13472
+Seam loops: 0
+Seam vertices: 0
+Seam triangles: 0
+Max seam vertex distance: 0
+Final vertices: 58466
+Final triangles: 115912
+Final edges: 174376
 Final boundary edges: 1016
 Final non-manifold edges: 0
 Final components: 2

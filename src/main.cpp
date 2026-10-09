@@ -5,6 +5,8 @@
 #include "MarchingCubes.hpp"
 #include "SingularityDetector.hpp"
 #include "app/MyViewer.h"
+#include "MeshGeometryCheck.hpp"
+#include "ScalarFieldPly.hpp"
 
 #include <pmp/io/io.h>
 #include <pmp/surface_mesh.h>
@@ -22,6 +24,11 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <map>
+#include <utility>
+#include <vector>
+#include <array>
+#include <queue>
 
 namespace
 {
@@ -45,27 +52,178 @@ std::unique_ptr<ImplicitSurface> make_surface(
 
 pmp::SurfaceMesh to_pmp_mesh(const iso::mc::Mesh& source)
 {
+    using Index = iso::mc::Index;
+    using Edge = std::pair<Index, Index>;
+
     pmp::SurfaceMesh mesh;
 
-    std::vector<pmp::Vertex> vertices;
-    vertices.reserve(source.vertices.size());
+    const std::size_t face_count = source.triangles.size();
+    const std::size_t corner_count = face_count * 3;
 
-    for (const auto& p : source.vertices)
+    if (face_count == 0)
+        return mesh;
+
+    /*
+     * PMP requires each vertex's incident faces to form a manifold fan.
+     *
+     * The internal MC mesh may intentionally contain a singular vertex
+     * where separate face fans meet at the same geometric position.
+     *
+     * Use one disjoint-set element per triangle corner. Corners are joined
+     * only when their faces share an edge containing the same source vertex.
+     * Thus, disconnected fans at a singularity are exported as distinct
+     * PMP vertices with identical coordinates.
+     *
+     * The source mesh itself is not modified.
+     */
+
+    std::vector<std::size_t> parent(corner_count);
+    std::vector<std::size_t> tree_rank(corner_count, 0);
+
+    for (std::size_t i = 0; i < corner_count; ++i)
+        parent[i] = i;
+
+    const auto find_root = [&](std::size_t x)
     {
-        vertices.push_back(
-            mesh.add_vertex(
-                pmp::Point(
-                    static_cast<float>(p[0]),
-                    static_cast<float>(p[1]),
-                    static_cast<float>(p[2]))));
+        while (parent[x] != x)
+        {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+
+        return x;
+    };
+
+    const auto unite = [&](std::size_t a, std::size_t b)
+    {
+        a = find_root(a);
+        b = find_root(b);
+
+        if (a == b)
+            return;
+
+        if (tree_rank[a] < tree_rank[b])
+            std::swap(a, b);
+
+        parent[b] = a;
+
+        if (tree_rank[a] == tree_rank[b])
+            ++tree_rank[a];
+    };
+
+    const auto make_edge = [](Index a, Index b) -> Edge
+    {
+        if (a > b)
+            std::swap(a, b);
+
+        return {a, b};
+    };
+
+    /*
+     * Find the triangles incident to every undirected edge.
+     */
+    std::map<Edge, std::vector<std::size_t>> edge_faces;
+
+    for (std::size_t fi = 0; fi < face_count; ++fi)
+    {
+        const auto& t = source.triangles[fi];
+
+        edge_faces[make_edge(t[0], t[1])].push_back(fi);
+        edge_faces[make_edge(t[1], t[2])].push_back(fi);
+        edge_faces[make_edge(t[2], t[0])].push_back(fi);
     }
 
-    for (const auto& triangle : source.triangles)
+    /*
+     * Return the corner-node index for a source vertex in one triangle.
+     */
+    const auto corner_for = [&](std::size_t face, Index vertex)
+        -> std::size_t
+    {
+        const auto& t = source.triangles[face];
+
+        for (std::size_t c = 0; c < 3; ++c)
+        {
+            if (t[c] == vertex)
+                return 3 * face + c;
+        }
+
+        throw std::runtime_error(
+            "PMP conversion: edge endpoint not found in triangle");
+    };
+
+    /*
+     * Adjacent faces belong to the same vertex fan when they share an edge.
+     * Join their corner nodes at both endpoints of each manifold edge.
+     */
+    for (const auto& [edge, faces] : edge_faces)
+    {
+        if (faces.size() > 2)
+        {
+            throw std::runtime_error(
+                "PMP conversion cannot represent a non-manifold edge");
+        }
+
+        if (faces.size() != 2)
+            continue;
+
+        const std::size_t f0 = faces[0];
+        const std::size_t f1 = faces[1];
+
+        unite(
+            corner_for(f0, edge.first),
+            corner_for(f1, edge.first));
+
+        unite(
+            corner_for(f0, edge.second),
+            corner_for(f1, edge.second));
+    }
+
+    /*
+     * Create one PMP vertex per connected face fan.
+     *
+     * Disconnected fans sharing a source vertex receive distinct PMP
+     * vertices, but those vertices retain the exact same position.
+     */
+    std::map<std::size_t, pmp::Vertex> fan_vertices;
+    std::vector<pmp::Vertex> corner_vertices(corner_count);
+
+    for (std::size_t fi = 0; fi < face_count; ++fi)
+    {
+        const auto& t = source.triangles[fi];
+
+        for (std::size_t c = 0; c < 3; ++c)
+        {
+            const std::size_t corner = 3 * fi + c;
+            const std::size_t root = find_root(corner);
+
+            auto it = fan_vertices.find(root);
+
+            if (it == fan_vertices.end())
+            {
+                const auto& p = source.vertices[t[c]];
+
+                const pmp::Vertex pv = mesh.add_vertex(
+                    pmp::Point(
+                        static_cast<float>(p[0]),
+                        static_cast<float>(p[1]),
+                        static_cast<float>(p[2])));
+
+                it = fan_vertices.emplace(root, pv).first;
+            }
+
+            corner_vertices[corner] = it->second;
+        }
+    }
+
+    /*
+     * Insert the triangles using the fan-aware vertex mapping.
+     */
+    for (std::size_t fi = 0; fi < face_count; ++fi)
     {
         mesh.add_triangle(
-            vertices[triangle[0]],
-            vertices[triangle[1]],
-            vertices[triangle[2]]);
+            corner_vertices[3 * fi],
+            corner_vertices[3 * fi + 1],
+            corner_vertices[3 * fi + 2]);
     }
 
     return mesh;
@@ -319,6 +477,153 @@ void write_report(
 }
 
 } // namespace
+
+
+void orient_components_to_implicit_gradient(
+    iso::mc::Mesh& mesh,
+    const ImplicitSurface& surface)
+{
+    using Index = iso::mc::Index;
+    using Edge = std::pair<Index, Index>;
+
+    const std::size_t face_count = mesh.triangles.size();
+
+    if (face_count == 0)
+        return;
+
+    const auto make_edge = [](Index a, Index b) -> Edge
+    {
+        if (a > b)
+            std::swap(a, b);
+        return {a, b};
+    };
+
+    // Build face adjacency through shared edges. Using edges rather
+    // than vertex adjacency keeps the two cone nappes separate at
+    // their singular apex.
+    std::map<Edge, std::vector<std::size_t>> edge_faces;
+
+    for (std::size_t fi = 0; fi < face_count; ++fi)
+    {
+        const auto& t = mesh.triangles[fi];
+
+        edge_faces[make_edge(t[0], t[1])].push_back(fi);
+        edge_faces[make_edge(t[1], t[2])].push_back(fi);
+        edge_faces[make_edge(t[2], t[0])].push_back(fi);
+    }
+
+    std::vector<std::vector<std::size_t>> neighbors(face_count);
+
+    for (const auto& [edge, faces] : edge_faces)
+    {
+        if (faces.size() != 2)
+            continue;
+
+        neighbors[faces[0]].push_back(faces[1]);
+        neighbors[faces[1]].push_back(faces[0]);
+    }
+
+    // Central finite differences approximate grad(f) at a point.
+    const auto gradient = [&](double x, double y, double z)
+    {
+        const double h = 1e-6 * std::max({
+            1.0, std::abs(x), std::abs(y), std::abs(z)
+        });
+
+        return std::array<double, 3>{
+            (surface.eval(x + h, y, z) -
+             surface.eval(x - h, y, z)) / (2.0 * h),
+
+            (surface.eval(x, y + h, z) -
+             surface.eval(x, y - h, z)) / (2.0 * h),
+
+            (surface.eval(x, y, z + h) -
+             surface.eval(x, y, z - h)) / (2.0 * h)
+        };
+    };
+
+    std::vector<char> visited(face_count, 0);
+    std::queue<std::size_t> queue;
+
+    for (std::size_t seed = 0; seed < face_count; ++seed)
+    {
+        if (visited[seed])
+            continue;
+
+        // First collect one edge-connected component. The current
+        // stitcher's orientation pass should already make its faces
+        // consistently wound relative to one another.
+        std::vector<std::size_t> component;
+
+        visited[seed] = 1;
+        queue.push(seed);
+
+        while (!queue.empty())
+        {
+            const std::size_t fi = queue.front();
+            queue.pop();
+
+            component.push_back(fi);
+
+            for (const std::size_t adjacent : neighbors[fi])
+            {
+                if (visited[adjacent])
+                    continue;
+
+                visited[adjacent] = 1;
+                queue.push(adjacent);
+            }
+        }
+
+        // Positive score means the component's normals point toward
+        // increasing scalar-field values; negative means the reverse.
+        // The cross product weights each face by its area.
+        double orientation_score = 0.0;
+
+        for (const std::size_t fi : component)
+        {
+            const auto& t = mesh.triangles[fi];
+            const auto& a = mesh.vertices[t[0]];
+            const auto& b = mesh.vertices[t[1]];
+            const auto& c = mesh.vertices[t[2]];
+
+            const double ux = b[0] - a[0];
+            const double uy = b[1] - a[1];
+            const double uz = b[2] - a[2];
+
+            const double vx = c[0] - a[0];
+            const double vy = c[1] - a[1];
+            const double vz = c[2] - a[2];
+
+            const double nx = uy * vz - uz * vy;
+            const double ny = uz * vx - ux * vz;
+            const double nz = ux * vy - uy * vx;
+
+            const double x = (a[0] + b[0] + c[0]) / 3.0;
+            const double y = (a[1] + b[1] + c[1]) / 3.0;
+            const double z = (a[2] + b[2] + c[2]) / 3.0;
+
+            const auto grad = gradient(x, y, z);
+
+            orientation_score +=
+                nx * grad[0] +
+                ny * grad[1] +
+                nz * grad[2];
+        }
+
+        // Reverse the entire component, not individual faces, so
+        // adjacent faces keep compatible edge directions.
+        if (orientation_score < 0.0)
+        {
+            for (const std::size_t fi : component)
+            {
+                std::swap(
+                    mesh.triangles[fi][1],
+                    mesh.triangles[fi][2]);
+            }
+        }
+    }
+}
 
 int main(int argc, char** argv)
 {
@@ -675,6 +980,82 @@ int main(int argc, char** argv)
             patch.mesh,
             local_filename);
 
+        const auto evaluate_scalar =
+            [&](double x, double y, double z)
+            {
+                return surface->eval(x, y, z);
+            };
+
+        auto global_ply_filename =
+            output_path(
+                output_dir,
+                "global_scalar",
+                surface_name,
+                c,
+                resolution,
+                level);
+        global_ply_filename.replace_extension(".ply");
+
+        iso::field_export::write_scalar_ply(
+            global,
+            global_ply_filename.string(),
+            evaluate_scalar,
+            global_options.isovalue,
+            singularity.center,
+            radius);
+
+        std::cout << "Saved scalar PLY: "
+                << global_ply_filename << '\n';
+
+        auto global_vtk_filename = global_ply_filename;
+        global_vtk_filename.replace_extension(".vtk");
+
+        iso::field_export::write_scalar_vtk(
+            global,
+            global_vtk_filename.string(),
+            evaluate_scalar,
+            global_options.isovalue,
+            singularity.center,
+            radius);
+
+        std::cout << "Saved scalar VTK: "
+                << global_vtk_filename << '\n';
+
+        auto local_ply_filename =
+            output_path(
+                output_dir,
+                "local_voxel_scalar",
+                surface_name,
+                c,
+                resolution,
+                level);
+        local_ply_filename.replace_extension(".ply");
+
+        iso::field_export::write_scalar_ply(
+            patch.mesh,
+            local_ply_filename.string(),
+            evaluate_scalar,
+            patch_options.isovalue,
+            singularity.center,
+            radius);
+
+        std::cout << "Saved scalar PLY: "
+                << local_ply_filename << '\n';
+
+        auto local_vtk_filename = local_ply_filename;
+        local_vtk_filename.replace_extension(".vtk");
+
+        iso::field_export::write_scalar_vtk(
+            patch.mesh,
+            local_vtk_filename.string(),
+            evaluate_scalar,
+            patch_options.isovalue,
+            singularity.center,
+            radius);
+
+        std::cout << "Saved scalar VTK: "
+                << local_vtk_filename << '\n';
+
         iso::stitch::StitchResult stitched;
         bool have_stitched_result = false;
 
@@ -696,6 +1077,13 @@ int main(int argc, char** argv)
                     singularity.center,
                     stitch_options);
 
+            orient_components_to_implicit_gradient(
+                stitched.mesh,
+                *surface);
+
+            stitched.topology =
+                iso::stitch::compute_topology(stitched.mesh);
+
             const auto stitch_end =
                 std::chrono::steady_clock::now();
 
@@ -705,6 +1093,31 @@ int main(int argc, char** argv)
                     .count();
 
             have_stitched_result = true;
+
+            if (surface_name == "cone" && std::abs(c) <= 1e-12)
+            {
+                const auto global_geometry =
+                    iso::geometry_check::measure(
+                        global,
+                        singularity.center,
+                        radius,
+                        4);
+
+                const auto stitched_geometry =
+                    iso::geometry_check::measure(
+                        stitched.mesh,
+                        singularity.center,
+                        radius,
+                        4);
+
+                iso::geometry_check::print_report(
+                    "GLOBAL MARCHING CUBES",
+                    global_geometry);
+
+                iso::geometry_check::print_report(
+                    "STITCHED MESH",
+                    stitched_geometry);
+            }
 
             std::cout
                 << "\nSTITCHED GLOBAL + LOCAL VOXEL MC\n"
@@ -742,6 +1155,41 @@ int main(int argc, char** argv)
             save_mesh(
                 stitched.mesh,
                 stitched_filename);
+
+            auto stitched_ply_filename =
+            output_path(
+                output_dir,
+                "stitched_scalar",
+                surface_name,
+                c,
+                resolution,
+                level);
+        stitched_ply_filename.replace_extension(".ply");
+
+        iso::field_export::write_scalar_ply(
+            stitched.mesh,
+            stitched_ply_filename.string(),
+            evaluate_scalar,
+            global_options.isovalue,
+            singularity.center,
+            radius);
+
+        std::cout << "Saved scalar PLY: "
+                << stitched_ply_filename << '\n';
+
+        auto stitched_vtk_filename = stitched_ply_filename;
+        stitched_vtk_filename.replace_extension(".vtk");
+
+        iso::field_export::write_scalar_vtk(
+            stitched.mesh,
+            stitched_vtk_filename.string(),
+            evaluate_scalar,
+            global_options.isovalue,
+            singularity.center,
+            radius);
+
+        std::cout << "Saved scalar VTK: "
+                << stitched_vtk_filename << '\n';
 
             const auto report_filename =
                 output_dir /
