@@ -126,6 +126,108 @@ void test_hyperboloids_have_regular_surface_points()
     CHECK(near(evals[2], 2.0));
 }
 
+void test_additional_degree_two_cones_have_isolated_singularities()
+{
+    EllipticConeSurface elliptic(0.0);
+    SingularityDetector elliptic_detector(elliptic, 1e-7, 1e-3);
+    const auto elliptic_result = elliptic_detector.classifyPoint(
+        pmp::Point(0.0f, 0.0f, 0.0f));
+    CHECK(elliptic_result.type == SingularityType::NonDegenerateSingular);
+    CHECK(std::abs(elliptic_result.function_value) < 1e-10);
+    CHECK(elliptic_result.gradient_norm < 1e-6);
+    CHECK(std::abs(elliptic_result.hessian_determinant) > 1e-2);
+
+    RotatedEllipticConeSurface rotated(0.0);
+    SingularityDetector rotated_detector(rotated, 1e-7, 1e-3);
+    const auto rotated_result = rotated_detector.classifyPoint(
+        pmp::Point(0.0f, 0.0f, 0.0f));
+    CHECK(rotated_result.type == SingularityType::NonDegenerateSingular);
+    CHECK(std::abs(rotated_result.function_value) < 1e-10);
+    CHECK(rotated_result.gradient_norm < 1e-6);
+    CHECK(std::abs(rotated_result.hessian_determinant) > 1e-2);
+
+    // Both equations must also produce non-empty degree-two isosurfaces.
+    iso::mc::Options options;
+    options.nx = 25;
+    options.ny = 25;
+    options.nz = 25;
+    options.isovalue = 0.0;
+    const iso::mc::Bounds bounds{
+        {-1.5, -1.5, -1.5},
+        { 1.5,  1.5,  1.5}
+    };
+    const auto elliptic_mesh = iso::mc::extract(
+        [&](double x, double y, double z) { return elliptic.eval(x, y, z); },
+        bounds, options);
+    const auto rotated_mesh = iso::mc::extract(
+        [&](double x, double y, double z) { return rotated.eval(x, y, z); },
+        bounds, options);
+    CHECK(!elliptic_mesh.vertices.empty());
+    CHECK(!elliptic_mesh.triangles.empty());
+    CHECK(!rotated_mesh.vertices.empty());
+    CHECK(!rotated_mesh.triangles.empty());
+}
+
+void test_more_degree_two_singular_surfaces()
+{
+    const pmp::Point origin(0.0f, 0.0f, 0.0f);
+
+    XAxisEllipticConeSurface x_cone(0.0);
+    SingularityDetector x_detector(x_cone, 1e-7, 1e-3);
+    const auto x_result = x_detector.classifyPoint(origin);
+    CHECK(x_result.type == SingularityType::NonDegenerateSingular);
+    CHECK(std::abs(x_result.function_value) < 1e-10);
+    CHECK(x_result.gradient_norm < 1e-6);
+    CHECK(std::abs(x_result.hessian_determinant) > 1e-2);
+
+    YAxisEllipticConeSurface y_cone(0.0);
+    SingularityDetector y_detector(y_cone, 1e-7, 1e-3);
+    const auto y_result = y_detector.classifyPoint(origin);
+    CHECK(y_result.type == SingularityType::NonDegenerateSingular);
+    CHECK(std::abs(y_result.function_value) < 1e-10);
+    CHECK(y_result.gradient_norm < 1e-6);
+    CHECK(std::abs(y_result.hessian_determinant) > 1e-2);
+
+    TiltedEllipticConeSurface tilted_cone(0.0);
+    SingularityDetector tilted_detector(tilted_cone, 1e-7, 1e-3);
+    const auto tilted_result = tilted_detector.classifyPoint(origin);
+    CHECK(tilted_result.type == SingularityType::NonDegenerateSingular);
+    CHECK(std::abs(tilted_result.function_value) < 1e-10);
+    CHECK(tilted_result.gradient_norm < 1e-6);
+    CHECK(std::abs(tilted_result.hessian_determinant) > 1e-2);
+
+    IntersectingPlanesSurface planes(0.0);
+    SingularityDetector planes_detector(planes, 1e-7, 1e-3);
+    const auto planes_result = planes_detector.classifyPoint(origin);
+    CHECK(planes_result.type == SingularityType::DegenerateSingular);
+    CHECK(std::abs(planes_result.function_value) < 1e-10);
+    CHECK(planes_result.gradient_norm < 1e-6);
+    CHECK(std::abs(planes_result.hessian_determinant) < 1e-3);
+
+    // Confirm the three isolated-cone examples are usable by Marching Cubes.
+    iso::mc::Options options;
+    options.nx = 25;
+    options.ny = 25;
+    options.nz = 25;
+    options.isovalue = 0.0;
+    const iso::mc::Bounds bounds{
+        {-1.5, -1.5, -1.5},
+        { 1.5,  1.5,  1.5}
+    };
+    const auto x_mesh = iso::mc::extract(
+        [&](double x, double y, double z) { return x_cone.eval(x, y, z); },
+        bounds, options);
+    const auto y_mesh = iso::mc::extract(
+        [&](double x, double y, double z) { return y_cone.eval(x, y, z); },
+        bounds, options);
+    const auto tilted_mesh = iso::mc::extract(
+        [&](double x, double y, double z) { return tilted_cone.eval(x, y, z); },
+        bounds, options);
+    CHECK(!x_mesh.triangles.empty());
+    CHECK(!y_mesh.triangles.empty());
+    CHECK(!tilted_mesh.triangles.empty());
+}
+
 void test_quartic_saddle_uses_generic_derivatives()
 {
     QuarticSaddleSurface surface(0.0, 0.05);
@@ -368,6 +470,8 @@ void test_local_voxel_patch_stitches_into_global_mesh()
 int main()
 {
     test_cone_classification();
+    test_additional_degree_two_cones_have_isolated_singularities();
+    test_more_degree_two_singular_surfaces();
     test_hyperboloids_have_regular_surface_points();
     test_quartic_saddle_uses_generic_derivatives();
     test_gradient_hessian_no_silent_zero_fallback();

@@ -35,12 +35,24 @@ std::unique_ptr<ImplicitSurface> make_surface(
 {
     if (name == "cone")
         return std::make_unique<ParameterizedConeQuadric>(c);
+    if (name == "elliptic-cone")
+        return std::make_unique<EllipticConeSurface>(c);
+    if (name == "rotated-cone")
+        return std::make_unique<RotatedEllipticConeSurface>(c);
+    if (name == "x-cone")
+        return std::make_unique<XAxisEllipticConeSurface>(c);
+    if (name == "y-cone")
+        return std::make_unique<YAxisEllipticConeSurface>(c);
+    if (name == "tilted-cone")
+        return std::make_unique<TiltedEllipticConeSurface>(c);
+    if (name == "crossing-planes")
+        return std::make_unique<IntersectingPlanesSurface>(c);
     if (name == "quartic")
         return std::make_unique<QuarticSaddleSurface>(c, 0.05);
     if (name == "sphere")
         return std::make_unique<SphereImplicitSurface>(1.0);
     throw std::invalid_argument(
-        "Unknown surface. Use cone, quartic or sphere.");
+        "Unknown surface. Use cone, elliptic-cone, rotated-cone, x-cone, y-cone, tilted-cone, crossing-planes, quartic or sphere.");
 }
 pmp::SurfaceMesh to_pmp_mesh(const iso::mc::Mesh& source)
 {
@@ -631,7 +643,7 @@ int main(int argc, char** argv)
             std::cout
                 << "Usage:\n"
                 << "  Isosurfaces [c] [resolution] [extent] [radius] [level]\n"
-                << "              [--surface cone|quartic|sphere]\n"
+                << "              [--surface cone|elliptic-cone|rotated-cone|x-cone|y-cone|tilted-cone|crossing-planes|quartic|sphere]\n"
                 << "              [--output DIR]\n"
                 << "              [--no-gui]\n"
                 << "              [--no-stitch]\n"
@@ -686,11 +698,17 @@ int main(int argc, char** argv)
             throw std::invalid_argument(
                 "level must be >= 1");
         if (surface_name != "cone" &&
+            surface_name != "elliptic-cone" &&
+            surface_name != "rotated-cone" &&
+            surface_name != "x-cone" &&
+            surface_name != "y-cone" &&
+            surface_name != "tilted-cone" &&
+            surface_name != "crossing-planes" &&
             surface_name != "quartic" &&
             surface_name != "sphere")
         {
             throw std::invalid_argument(
-                "Unknown surface. Use cone, quartic or sphere.");
+                "Unknown surface. Use cone, elliptic-cone, rotated-cone, x-cone, y-cone, tilted-cone, crossing-planes, quartic or sphere.");
         }
         std::filesystem::create_directories(output_dir);
         const auto surface =
