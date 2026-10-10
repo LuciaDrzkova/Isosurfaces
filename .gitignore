@@ -1,10 +1,10 @@
-# ---- Build output ----
-build/
-build-*/
-out/
-cmake-build-*/
+# CMake build directories
+/build/
+/build-*/
+/out/
+/cmake-build-*/
 
-# ---- CMake generated files (if ever configured outside build/) ----
+# CMake generated files
 CMakeCache.txt
 CMakeFiles/
 CMakeScripts/
@@ -13,9 +13,12 @@ compile_commands.json
 Makefile
 Testing/
 
-# ---- Compiled binaries / intermediates ----
+# Generated experiment outputs (meshes, scalar fields, reports, CSV files)
+/outputs/
+/output.obj
+
+# Compiled object files and binaries
 *.o
-*.obj
 *.exe
 *.out
 *.app
@@ -25,14 +28,7 @@ Testing/
 *.pdb
 *.ilk
 
-# Exception: never ignore real mesh assets shipped with the project,
-# even though some also end in .obj
-!assets/**/*.obj
-
-# ---- Program output (generated each run, not source) ----
-output.obj
-
-# ---- VS Code ----
+# VS Code (keep shared project settings)
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
@@ -40,16 +36,16 @@ output.obj
 !.vscode/extensions.json
 !.vscode/cmake-kits.json
 
-# ---- Visual Studio (in case it's opened there too on Windows) ----
+# Visual Studio
 .vs/
 *.sln
 *.vcxproj*
 *.suo
 
-# ---- Xcode (in case it's opened there too on Mac) ----
+# Xcode
 *.xcodeproj/
 DerivedData/
 
-# ---- OS clutter ----
+# OS clutter
 .DS_Store
 Thumbs.db
