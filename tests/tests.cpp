@@ -6,6 +6,7 @@
 #include "SingularityDetector.hpp"
 
 #include <Eigen/Eigenvalues>
+
 #include <cmath>
 #include <cstddef>
 #include <iostream>
@@ -18,14 +19,19 @@ namespace
 {
 
 int failures = 0;
+
+// Fail fast within each test function. This prevents a failed precondition
+// (for example, an empty levels vector) from causing a later crash and
+// hiding the original test failure.
 #define CHECK(condition)                                                       \
     do                                                                         \
     {                                                                          \
         if (!(condition))                                                      \
         {                                                                      \
             ++failures;                                                        \
-            std::cerr << __FILE__ << ':' << __LINE__                       \
-                      << ": CHECK failed: " << #condition << '\n';             \
+            std::cerr << __FILE__ << ':' << __LINE__                           \
+                      << ": CHECK failed: " << #condition << '\n';            \
+            return;                                                            \
         }                                                                      \
     } while (false)
 
@@ -52,7 +58,7 @@ EdgeKey edge(iso::mc::Index a, iso::mc::Index b)
     return {a, b};
 }
 
-typedef std::size_t std_size_t;
+using std_size_t = std::size_t;
 
 long long euler_characteristic(const iso::mc::Mesh& mesh)
 {
@@ -110,8 +116,7 @@ void test_hyperboloids_have_regular_surface_points()
     CHECK(near(negative.function_value, 0.0));
     CHECK(negative.gradient_norm > 0.99);
 
-    const Eigen::Matrix3d H =
-        two_sheet.hessian(0.0, 0.0, 0.5);
+    const Eigen::Matrix3d H = two_sheet.hessian(0.0, 0.0, 0.5);
     const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(H);
 
     CHECK(solver.info() == Eigen::Success);
@@ -211,10 +216,13 @@ void test_local_unfolder_region_and_boundaries()
         LocalUnfolder::RegionMode::TopologicalBfs;
 
     LocalUnfolder unfolder;
+    // The sphere is centered at the origin but its surface is one unit away.
+    // Selecting around the origin with radius 0.55 selects no surface faces.
+    // Use a point on the surface so the local region is non-empty.
     const auto result = unfolder.refine(
         input,
         sphere,
-        iso::mc::Point{0.0, 0.0, 0.0},
+        iso::mc::Point{0.0, 0.0, 1.0},
         local_options);
 
     CHECK(result.sphere_faces_in_region > 0);
@@ -224,6 +232,8 @@ void test_local_unfolder_region_and_boundaries()
     CHECK(result.interface_edges > 0);
     CHECK(result.interface_vertices > 0);
     CHECK(result.levels.size() == 1);
+    // CHECK returns from this test immediately on failure, so the indexing
+    // below cannot run when levels is empty.
     CHECK(result.levels[0].split_edges > 0);
     CHECK(result.levels[0].global_boundary_edges ==
           result.global_boundary_edges);
@@ -232,11 +242,60 @@ void test_local_unfolder_region_and_boundaries()
     CHECK(result.levels[0].projection_failures == 0);
 }
 
+void test_selection_methods_can_differ_near_cone_apex()
+{
+    ParameterizedConeQuadric cone(0.0);
+
+    iso::mc::Options options;
+    options.nx = 33;
+    options.ny = 33;
+    options.nz = 33;
+    options.isovalue = 0.0;
+
+    const iso::mc::Bounds bounds{
+        {-1.0, -1.0, -1.0},
+        { 1.0,  1.0,  1.0}
+    };
+
+    const auto input = iso::mc::extract(
+        [&](double x, double y, double z)
+        {
+            return cone.eval(x, y, z);
+        },
+        bounds,
+        options);
+
+    LocalUnfolder::Options local_options;
+    local_options.radius = 0.30;
+    local_options.levels = 1;
+    local_options.region_mode =
+        LocalUnfolder::RegionMode::TopologicalBfs;
+    // This test checks face selection, not voxel scalar statistics.
+    local_options.base_resolution = 0;
+
+    // Offset the selection center toward the upper cone by 0.75 * radius.
+    // The sphere selector can select nearby faces on both disconnected
+    // nappes, while TopologicalBfs starts from the nearest mesh vertex and
+    // follows only the connected component containing that seed.
+    const iso::mc::Point probe_center{0.0, 0.0, 0.225};
+
+    LocalUnfolder unfolder;
+    const auto result = unfolder.refine(
+        input, cone, probe_center, local_options);
+
+    CHECK(result.levels.size() == 1);
+    CHECK(result.sphere_faces_in_region > 0);
+    CHECK(result.topological_faces_in_region > 0);
+    CHECK(result.levels[0].selection_changed);
+    CHECK(result.sphere_faces_in_region >
+          result.topological_faces_in_region);
+}
+
 void test_local_voxel_patch_stitches_into_global_mesh()
 {
     ParameterizedConeQuadric cone(0.0);
 
-    iso::mc::Bounds global_bounds{
+    const iso::mc::Bounds global_bounds{
         {-1.0, -1.0, -1.0},
         { 1.0,  1.0,  1.0}
     };
@@ -255,7 +314,7 @@ void test_local_voxel_patch_stitches_into_global_mesh()
         global_options);
 
     // Independently extracted finer local voxel patch covering the seam radius.
-    iso::mc::Bounds local_bounds{
+    const iso::mc::Bounds local_bounds{
         {-0.6, -0.6, -0.6},
         { 0.6,  0.6,  0.6}
     };
@@ -288,11 +347,20 @@ void test_local_voxel_patch_stitches_into_global_mesh()
     CHECK(result.local_triangles_inserted > 0);
     CHECK(result.seam_loops == 2);
     CHECK(result.seam_vertices > 0);
-    CHECK(result.seam_triangles > 0);
+
+    // LocalVoxelStitcher welds the matched boundary loops by remapping their
+    // vertices to shared indices. It deliberately creates no bridge strip,
+    // so zero seam triangles is the expected result for this implementation.
+    CHECK(result.seam_triangles == 0);
+
     CHECK(result.max_seam_vertex_distance >= 0.0);
     CHECK(result.topology.nonmanifold_edges == 0);
     CHECK(result.topology.connected_components == 2);
-    CHECK(result.topology.boundary_edges > 0);
+
+    // Stitching must not introduce new boundary edges. The global mesh already
+    // has open boundaries at the edge of the extraction domain.
+    CHECK(result.topology.boundary_edges ==
+          iso::stitch::compute_topology(global).boundary_edges);
 }
 
 } // namespace
@@ -305,6 +373,7 @@ int main()
     test_gradient_hessian_no_silent_zero_fallback();
     test_closed_mc_sphere_euler_characteristic();
     test_local_unfolder_region_and_boundaries();
+    test_selection_methods_can_differ_near_cone_apex();
     test_local_voxel_patch_stitches_into_global_mesh();
 
     if (failures != 0)

@@ -1,0 +1,55 @@
+Implicit isosurface experiment
+==============================
+
+Surface: cone
+c: 0
+Global resolution: 129^3
+Extent: 2
+Local radius: 0.25
+Local level: 2
+
+Global MC
+---------
+Extraction time ms: 26.826374999999999
+Vertices: 58466
+Triangles: 115912
+Edges: 174376
+Boundary edges: 1016
+Non-manifold edges: 0
+Components: 2
+
+Singularity
+-----------
+Found: yes
+Type: NonDegenerateSingular
+Position: 0 0 0
+Gradient norm: 0
+Function value: 0
+
+Local voxel MC
+--------------
+Resolution: 73x73x73
+Vertices: 17769
+Triangles: 34968
+Boundary edges: 568
+Boundary vertices: 568
+Non-manifold edges: 0
+Extraction time ms: 2.5099589999999998
+Topology edges: 52736
+Topology components: 1
+
+Stitching
+---------
+Success: no
+Global triangles removed: 808
+Local triangles inserted: 13472
+Seam loops: 0
+Seam vertices: 0
+Seam triangles: 0
+Max seam vertex distance: 0
+Final vertices: 58466
+Final triangles: 115912
+Final edges: 174376
+Final boundary edges: 1016
+Final non-manifold edges: 0
+Final components: 2
