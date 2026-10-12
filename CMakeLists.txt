@@ -12,7 +12,6 @@ endif()
 
 include(FetchContent)
 include(CTest)
-
 enable_testing()
 set(PMP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(PMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -20,7 +19,6 @@ set(PMP_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(PMP_BUILD_VIS ON CACHE BOOL "" FORCE)
 set(PMP_INSTALL ON CACHE BOOL "" FORCE)
 set(PMP_STRICT_COMPILATION OFF CACHE BOOL "" FORCE)
-
 FetchContent_Declare(
   pmp-library
   GIT_REPOSITORY https://github.com/pmp-library/pmp-library.git
@@ -39,25 +37,20 @@ target_include_directories(iso_research INTERFACE
   $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(iso_research INTERFACE pmp)
-
 find_package(Threads REQUIRED)
 
 add_executable(Isosurfaces src/main.cpp)
 target_include_directories(Isosurfaces PRIVATE src include)
 target_link_libraries(Isosurfaces PRIVATE iso_research pmp_vis Threads::Threads)
 
-# Research-data executable:
-# - compares the conforming LocalUnfolder baseline with
-#   independently extracted local voxel MC patches,
-# - stitches the voxel patch back into the global MC mesh,
-# - sweeps c/resolution/radius/levels and records topology + scalar statistics,
-# - supports the original cone, a non-quadric quartic saddle, and a sphere.
+# Research sweep now compares classic MC, uniform-grid Dual Contouring, the
+# proposed local voxel patch+stitching method, and LocalUnfolder as a secondary
+# project-specific baseline. CSV includes topology and generic geometric metrics.
 add_executable(IsosurfacesSweep src/research_sweep.cpp)
 target_include_directories(IsosurfacesSweep PRIVATE include src)
 target_link_libraries(IsosurfacesSweep PRIVATE iso_research pmp Threads::Threads)
 
-# Single-configuration research viewer for the new voxel-patch -> global
-# stitching path. The existing Isosurfaces executable remains the baseline GUI.
+# Interactive viewer for the local voxel-patch -> global stitching path.
 add_executable(IsosurfacesStitched src/stitched_viewer.cpp)
 target_include_directories(IsosurfacesStitched PRIVATE include src)
 target_link_libraries(IsosurfacesStitched PRIVATE iso_research pmp_vis Threads::Threads)
@@ -65,5 +58,9 @@ target_link_libraries(IsosurfacesStitched PRIVATE iso_research pmp_vis Threads::
 add_executable(IsosurfacesTests tests/tests.cpp)
 target_include_directories(IsosurfacesTests PRIVATE include src)
 target_link_libraries(IsosurfacesTests PRIVATE iso_research pmp Threads::Threads)
-
 add_test(NAME IsosurfacesTests COMMAND IsosurfacesTests)
+
+add_executable(IsosurfacesComparisonTests tests/comparison_tests.cpp)
+target_include_directories(IsosurfacesComparisonTests PRIVATE include src)
+target_link_libraries(IsosurfacesComparisonTests PRIVATE iso_research pmp Threads::Threads)
+add_test(NAME IsosurfacesComparisonTests COMMAND IsosurfacesComparisonTests)

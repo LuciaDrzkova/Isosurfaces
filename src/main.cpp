@@ -7,6 +7,7 @@
 #include "app/MyViewer.h"
 #include "MeshGeometryCheck.hpp"
 #include "ScalarFieldPly.hpp"
+#include "SurfaceFactory.hpp"
 #include <pmp/io/io.h>
 #include <pmp/surface_mesh.h>
 #include <algorithm>
@@ -33,26 +34,7 @@ std::unique_ptr<ImplicitSurface> make_surface(
     const std::string& name,
     double c)
 {
-    if (name == "cone")
-        return std::make_unique<ParameterizedConeQuadric>(c);
-    if (name == "elliptic-cone")
-        return std::make_unique<EllipticConeSurface>(c);
-    if (name == "rotated-cone")
-        return std::make_unique<RotatedEllipticConeSurface>(c);
-    if (name == "x-cone")
-        return std::make_unique<XAxisEllipticConeSurface>(c);
-    if (name == "y-cone")
-        return std::make_unique<YAxisEllipticConeSurface>(c);
-    if (name == "tilted-cone")
-        return std::make_unique<TiltedEllipticConeSurface>(c);
-    if (name == "crossing-planes")
-        return std::make_unique<IntersectingPlanesSurface>(c);
-    if (name == "quartic")
-        return std::make_unique<QuarticSaddleSurface>(c, 0.05);
-    if (name == "sphere")
-        return std::make_unique<SphereImplicitSurface>(1.0);
-    throw std::invalid_argument(
-        "Unknown surface. Use cone, elliptic-cone, rotated-cone, x-cone, y-cone, tilted-cone, crossing-planes, quartic or sphere.");
+    return make_implicit_surface(name, c);
 }
 pmp::SurfaceMesh to_pmp_mesh(const iso::mc::Mesh& source)
 {
@@ -245,6 +227,17 @@ SingularityCandidate find_surface_singularity(
     const SingularityDetector& detector)
 {
     SingularityCandidate candidate;
+    const auto origin_result = detector.classifyPoint(pmp::Point(0.0f, 0.0f, 0.0f));
+    if (origin_result.type != SingularityType::Regular &&
+        std::abs(origin_result.function_value) <= 1e-12)
+    {
+        candidate.found = true;
+        candidate.center = {0.0, 0.0, 0.0};
+        candidate.gradient_norm = origin_result.gradient_norm;
+        candidate.function_value = origin_result.function_value;
+        candidate.type = origin_result.type;
+        return candidate;
+    }
     for (const auto& p : mesh.vertices)
     {
         const pmp::Point point(
@@ -254,7 +247,7 @@ SingularityCandidate find_surface_singularity(
         const auto result = detector.classifyPoint(point);
         if (result.type == SingularityType::Regular)
             continue;
-        if (std::abs(result.function_value) > 1e-5)
+        if (std::abs(result.function_value) > 1e-12)
             continue;
         if (!candidate.found ||
             result.gradient_norm < candidate.gradient_norm)
@@ -697,18 +690,12 @@ int main(int argc, char** argv)
         if (level == 0)
             throw std::invalid_argument(
                 "level must be >= 1");
-        if (surface_name != "cone" &&
-            surface_name != "elliptic-cone" &&
-            surface_name != "rotated-cone" &&
-            surface_name != "x-cone" &&
-            surface_name != "y-cone" &&
-            surface_name != "tilted-cone" &&
-            surface_name != "crossing-planes" &&
-            surface_name != "quartic" &&
-            surface_name != "sphere")
+        const auto supported_surfaces = implicit_surface_names();
+        if (std::find(supported_surfaces.begin(), supported_surfaces.end(),
+                      surface_name) == supported_surfaces.end())
         {
             throw std::invalid_argument(
-                "Unknown surface. Use cone, elliptic-cone, rotated-cone, x-cone, y-cone, tilted-cone, crossing-planes, quartic or sphere.");
+                "Unknown surface. Check the --help list.");
         }
         std::filesystem::create_directories(output_dir);
         const auto surface =
@@ -1154,24 +1141,23 @@ int main(int argc, char** argv)
             have_stitched_result = true;
             if (surface_name == "cone" && std::abs(c) <= 1e-12)
             {
-                const auto global_geometry =
-                    iso::geometry_check::measure(
-                        global,
-                        singularity.center,
-                        radius,
-                        4);
-                const auto stitched_geometry =
-                    iso::geometry_check::measure(
-                        stitched.mesh,
-                        singularity.center,
-                        radius,
-                        4);
-                iso::geometry_check::print_report(
-                    "GLOBAL MARCHING CUBES",
-                    global_geometry);
-                iso::geometry_check::print_report(
-                    "STITCHED MESH",
-                    stitched_geometry);
+                // Preserve the exact, closed-form distance for the canonical cone.
+                const auto global_geometry = iso::geometry_check::measure(
+                    global, singularity.center, radius, 4);
+                const auto stitched_geometry = iso::geometry_check::measure(
+                    stitched.mesh, singularity.center, radius, 4);
+                iso::geometry_check::print_report("GLOBAL MARCHING CUBES (exact cone distance)", global_geometry);
+                iso::geometry_check::print_report("STITCHED MESH (exact cone distance)", stitched_geometry);
+            }
+            else
+            {
+                // Generic damped normal projection supports every ImplicitSurface.
+                const auto global_geometry = iso::geometry_check::measure(
+                    global, *surface, singularity.center, radius, 1);
+                const auto stitched_geometry = iso::geometry_check::measure(
+                    stitched.mesh, *surface, singularity.center, radius, 1);
+                iso::geometry_check::print_report("GLOBAL MARCHING CUBES (generic distance estimate)", global_geometry);
+                iso::geometry_check::print_report("STITCHED MESH (generic distance estimate)", stitched_geometry);
             }
             std::cout
                 << "\nSTITCHED GLOBAL + LOCAL VOXEL MC\n"
