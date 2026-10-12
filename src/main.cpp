@@ -483,6 +483,8 @@ void write_report(
         report << "---------\n";
         report << "Success: "
                << (stitched->stitched ? "yes" : "no") << '\n';
+        if (!stitched->stitched && !stitched->failure_reason.empty())
+            report << "Failure reason: " << stitched->failure_reason << '\n';
         report << "Global triangles removed: "
                << stitched->global_triangles_removed << '\n';
         report << "Local triangles inserted: "
@@ -1163,8 +1165,10 @@ int main(int argc, char** argv)
                 << "\nSTITCHED GLOBAL + LOCAL VOXEL MC\n"
                 << "  stitched            : "
                 << (stitched.stitched ? "YES" : "NO")
-                << '\n'
-                << "  stitch time         : "
+                    << '\n';
+                if (!stitched.stitched && !stitched.failure_reason.empty())
+                    std::cout << "  stitch failure reason: " << stitched.failure_reason << '\n';
+                std::cout << "  stitch time         : "
                 << stitch_ms << " ms\n"
                 << "  global triangles removed: "
                 << stitched.global_triangles_removed << '\n'

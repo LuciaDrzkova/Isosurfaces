@@ -9,7 +9,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
-
 include(FetchContent)
 include(CTest)
 enable_testing()
@@ -30,7 +29,6 @@ if(TARGET imgui)
   list(GET _glfw_dirs 0 _glfw_dir)
   target_include_directories(imgui PRIVATE "${_glfw_dir}/include")
 endif()
-
 add_library(iso_research INTERFACE)
 target_include_directories(iso_research INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -42,25 +40,31 @@ find_package(Threads REQUIRED)
 add_executable(Isosurfaces src/main.cpp)
 target_include_directories(Isosurfaces PRIVATE src include)
 target_link_libraries(Isosurfaces PRIVATE iso_research pmp_vis Threads::Threads)
-
-# Research sweep now compares classic MC, uniform-grid Dual Contouring, the
-# proposed local voxel patch+stitching method, and LocalUnfolder as a secondary
-# project-specific baseline. CSV includes topology and generic geometric metrics.
 add_executable(IsosurfacesSweep src/research_sweep.cpp)
 target_include_directories(IsosurfacesSweep PRIVATE include src)
 target_link_libraries(IsosurfacesSweep PRIVATE iso_research pmp Threads::Threads)
-
-# Interactive viewer for the local voxel-patch -> global stitching path.
 add_executable(IsosurfacesStitched src/stitched_viewer.cpp)
 target_include_directories(IsosurfacesStitched PRIVATE include src)
 target_link_libraries(IsosurfacesStitched PRIVATE iso_research pmp_vis Threads::Threads)
+
+# Dedicated patch-only viewer: extracts one local patch, samples every corner,
+# writes the scalar CSV, and displays the patch plus the matching voxel grid.
+add_executable(IsosurfacesPatchViewer src/local_patch_viewer.cpp)
+target_include_directories(IsosurfacesPatchViewer PRIVATE include src)
+target_link_libraries(IsosurfacesPatchViewer PRIVATE iso_research pmp_vis Threads::Threads)
 
 add_executable(IsosurfacesTests tests/tests.cpp)
 target_include_directories(IsosurfacesTests PRIVATE include src)
 target_link_libraries(IsosurfacesTests PRIVATE iso_research pmp Threads::Threads)
 add_test(NAME IsosurfacesTests COMMAND IsosurfacesTests)
-
 add_executable(IsosurfacesComparisonTests tests/comparison_tests.cpp)
 target_include_directories(IsosurfacesComparisonTests PRIVATE include src)
 target_link_libraries(IsosurfacesComparisonTests PRIVATE iso_research pmp Threads::Threads)
 add_test(NAME IsosurfacesComparisonTests COMMAND IsosurfacesComparisonTests)
+
+# Feature-based stitching regressions (existing test suites remain enabled).
+add_executable(IsosurfacesStitchingTests tests/stitching_regression_tests.cpp)
+target_include_directories(IsosurfacesStitchingTests PRIVATE include src)
+target_link_libraries(IsosurfacesStitchingTests PRIVATE iso_research Threads::Threads)
+add_test(NAME IsosurfacesStitchingTests COMMAND IsosurfacesStitchingTests)
+
